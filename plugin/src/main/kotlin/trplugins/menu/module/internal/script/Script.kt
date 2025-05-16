@@ -3,8 +3,12 @@ package trplugins.menu.module.internal.script
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import taboolib.common.platform.ProxyPlayer
+import taboolib.common.platform.function.adaptPlayer
+import trplugins.menu.TrMenu.actionHandle
 import trplugins.menu.api.TrMenuAPI
+import trplugins.menu.api.action.base.ActionEntry
 import trplugins.menu.module.display.MenuSession
+import trplugins.menu.module.internal.script.jexl.JexlAgent
 import trplugins.menu.module.internal.script.js.JavaScriptAgent
 import trplugins.menu.util.EvalResult
 
@@ -37,6 +41,22 @@ fun ProxyPlayer.evalScript(script: String?) =
 fun Player.evalScript(script: String?): EvalResult {
     script ?: return EvalResult(null)
     val (isJavaScript, js) = JavaScriptAgent.serialize(script)
-    return if (isJavaScript) JavaScriptAgent.eval(MenuSession.getSession(this), js!!)
-    else TrMenuAPI.instantKether(this, script)
+    if (isJavaScript) {
+        return JavaScriptAgent.eval(MenuSession.getSession(this), js!!)
+    }
+    val (isJexlScript,jexl) = JexlAgent.serialize(script)
+    return if (isJexlScript) {
+        JexlAgent.eval(MenuSession.getSession(this), jexl!!)
+    } else {
+        return TrMenuAPI.instantKether(this, script)
+    }
+}
+
+/*
+
+对于 Action 来说,不关心返回值,所以 Action 和 Condition 就不应该用一个，因为 runAction 没有返回值
+ */
+fun Player.evalAction(script: String?) {
+    script ?: return
+    actionHandle.runAction(adaptPlayer(this), ActionEntry.of(actionHandle,script))
 }

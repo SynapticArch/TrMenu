@@ -17,6 +17,7 @@ import trplugins.menu.module.internal.item.ItemSource
 import trplugins.menu.util.Regexs
 import trplugins.menu.util.bukkit.Heads
 import trplugins.menu.util.bukkit.ItemHelper
+import trplugins.menu.util.hybrid.ModItemSource
 
 /**
  * @author Arasple
@@ -37,9 +38,10 @@ class Texture(
 
         var itemStack = when (type) {
             TextureType.NORMAL -> parseMaterial(temp)
-            TextureType.HEAD -> Heads.getHeadX(temp)
+            TextureType.HEAD -> Heads.getHead(temp)
             TextureType.REPO -> ItemRepository.getItem(temp)
             TextureType.SOURCE -> ItemSource.fromSource(session, temp)
+            TextureType.MOD -> ModItemSource.getItem(temp)
             TextureType.RAW -> ItemHelper.fromJson(temp)
         }
 
@@ -119,14 +121,14 @@ class Texture(
             var texture = raw
             val meta = mutableMapOf<TextureMeta, String>()
 
-            TextureMeta.entries.forEach {
+            TextureMeta.values().forEach {
                 it.regex.find(raw)?.groupValues?.get(1)?.also { value ->
                     meta[it] = value
                     texture = texture.replace(it.regex, "")
                 }
             }
 
-            TextureType.entries.filter { it.group != -1 }.forEach {
+            TextureType.values().filter { it.group != -1 }.forEach {
                 it.regex.find(texture)?.groupValues?.get(it.group)?.also { value ->
                     type = it
                     texture = value

@@ -1,5 +1,6 @@
 package trplugins.menu.module.display.item
 
+import org.bukkit.NamespacedKey
 import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.ItemMeta
@@ -16,16 +17,20 @@ import trplugins.menu.util.Regexs
  * 显示物品的非动画, 支持动态的属性
  */
 class Meta(
-    private val amount: String,
-    private val shiny: String,
-    private val flags: Array<ItemFlag>,
-    private val nbt: ItemTag?,
+    val amount: String,
+    val shiny: String,
+    val flags: Array<ItemFlag>,
+    val nbt: ItemTag?,
+    val tooltip: String?,
+    val itemModel: String?,
+    val hideTooltip: String,
 ) {
 
     private val isAmountDynamic = amount.toIntOrNull() == null
     private val isShinyDynamic = !shiny.matches(Regexs.BOOLEAN)
+    private val isHideTooltipDynamic = !hideTooltip.matches(Regexs.BOOLEAN)
     private val isNBTDynamic = nbt != null && Regexs.containsPlaceholder(nbt.toJsonSimplified())
-    val isDynamic = isAmountDynamic || isNBTDynamic || isShinyDynamic
+    val isDynamic = isAmountDynamic || isNBTDynamic || isShinyDynamic || isHideTooltipDynamic
 
     fun amount(session: MenuSession): Int {
         return (if (isAmountDynamic) session.parse(amount) else amount).toDoubleOrNull()?.toInt() ?: 1
@@ -58,6 +63,28 @@ class Meta(
 
     fun hasAmount(): Boolean {
         return amount.isNotEmpty() || amount.toIntOrNull() != null
+    }
+
+    fun tooltipStyle(session: MenuSession, builder: ItemBuilder) {
+        if (tooltip.isNullOrEmpty()) {
+            return
+        }
+        val key = session.placeholderPlayer.evalScript(tooltip).asString().let { NamespacedKey.fromString(it) }
+        builder.tooltipStyle = key
+    }
+
+    fun itemModel(session: MenuSession, builder: ItemBuilder) {
+        if (itemModel.isNullOrEmpty()) {
+            return
+        }
+        val key = session.placeholderPlayer.evalScript(itemModel).asString().let { NamespacedKey.fromString(it) }
+        builder.itemModel = key
+    }
+
+    fun hideTooltip(session: MenuSession, builder: ItemBuilder) {
+        if ((hideTooltip.toBoolean()) || (isHideTooltipDynamic && session.placeholderPlayer.evalScript(hideTooltip).asBoolean())) {
+            builder.isHideTooltip = true
+        }
     }
 
 }

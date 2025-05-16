@@ -69,9 +69,9 @@ object Shortcuts {
 
         PLAYER_INVENTORY_BORDER_LEFT("PlayerInventory-Border-Left"),
 
-        PLAYER_INVENTORY_BORDER_RIGHT("PlayerInventory-Border-Left"),
+        PLAYER_INVENTORY_BORDER_RIGHT("PlayerInventory-Border-Right"),
 
-        PLAYER_INVENTORY_BORDER_MIDDLE("PlayerInventory-Border-Left");
+        PLAYER_INVENTORY_BORDER_MIDDLE("PlayerInventory-Border-Middle");
 
         companion object {
 
@@ -80,7 +80,7 @@ object Shortcuts {
             fun load() {
                 REACTIONS.clear()
 
-                entries.forEach {
+                values().forEach {
                     Reactions.ofReaction(actionHandle, TrMenu.SETTINGS["Shortcuts.${it.key}"]).let { react ->
                         if (!react.isEmpty()) {
                             REACTIONS[it] = react

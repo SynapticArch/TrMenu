@@ -6,6 +6,7 @@ import trplugins.menu.api.TrMenuAPI
 import trplugins.menu.module.display.MenuSession
 import trplugins.menu.module.internal.data.Metadata
 import trplugins.menu.module.internal.hook.HookPlugin
+import trplugins.menu.module.internal.script.jexl.JexlAgent
 import trplugins.menu.module.internal.script.js.JavaScriptAgent
 import trplugins.menu.util.Regexs
 import trplugins.menu.util.collections.Variables
@@ -20,7 +21,11 @@ object FunctionParser {
     private val functionPattern = "\\$?\\{(\\w+)s?: ?(.+?[^\\\\}])}".toRegex()
     private val internalFunctionPattern = "\\$\\{([^0-9].+?[^\\\\}])}".toRegex()
 
-    fun parse(player: Player, input: String, block: (type: String, value: String) -> String? = { _, value -> "{$value}" }): String {
+    fun parse(
+        player: Player,
+        input: String,
+        block: (type: String, value: String) -> String? = { _, value -> "{$value}" }
+    ): String {
         return runCatching {
             if (!Regexs.containsPlaceholder(input)) return input
             val session = MenuSession.getSession(player)
@@ -34,10 +39,11 @@ object FunctionParser {
                     when (val type = split[0].removePrefix(" ").lowercase()) {
                         "kether", "ke" -> parseKetherFunction(player, value)
                         "javascript", "js" -> parseJavaScript(session, value)
+                        "jexl" -> parseJexlScript(session, value)
                         "meta", "m" -> Metadata.getMeta(player)[value].toString()
                         "data", "d" -> Metadata.getData(player)[value].toString()
-                        "globaldata", "gdata", "g" -> runCatching { Metadata.globalData[value].toString() }.getOrElse { "null" }
-                        "lang", "triton" -> parseLangText(player, value)
+                        "globaldata", "gdata", "g" -> Metadata.getGlobalData(value)?.toString() ?: "null"
+                        "triton" -> parseLangText(player, value)
 
                         else -> block(type, value) ?: "{${it.value}}"
                     }
@@ -75,9 +81,15 @@ object FunctionParser {
         return JavaScriptAgent.eval(session, input).asString()
     }
 
+    private fun parseJexlScript(session: MenuSession, input: String): String {
+        return JexlAgent.eval(session, input).asString()
+    }
+
     private fun parseLangText(player: Player, text: String): String {
         val split = text.split("=", limit = 2)
-        return HookPlugin.getTriton().getText(player, split[0], if (split.size < 2) emptyArray() else split[1].split("_||_").toTypedArray()).toString()
+        return HookPlugin.getTriton()
+            .getText(player, split[0], if (split.size < 2) emptyArray() else split[1].split("_||_").toTypedArray())
+            .toString()
     }
 
 }

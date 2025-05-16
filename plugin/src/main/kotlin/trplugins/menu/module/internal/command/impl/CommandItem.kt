@@ -19,6 +19,7 @@ import taboolib.platform.util.sendLang
 import taboolib.type.BukkitEquipment
 import trplugins.menu.module.internal.command.CommandExpression
 import trplugins.menu.module.internal.hook.HookPlugin
+import trplugins.menu.module.internal.hook.impl.HookNBTAPI
 import trplugins.menu.module.internal.item.ItemRepository
 import trplugins.menu.util.bukkit.ItemHelper
 

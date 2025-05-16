@@ -1,29 +1,19 @@
-
-val taboolibVersion: String by project
+import io.izzel.taboolib.gradle.*
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     java
-    `maven-publish`
-    kotlin("jvm") version "1.9.20" apply false
-    id("io.izzel.taboolib") version "1.56" apply false
+    idea
+    kotlin("jvm") version "2.1.0"
+    id("io.izzel.taboolib") version "2.0.23"
 }
 
-description = "Modern & Advanced Menu-Plugin for Minecraft Servers"
-
-repositories {
-    mavenCentral()
-    maven("https://repo.tabooproject.org/repository/releases")
-    maven("https://jitpack.io")
-}
-
-tasks.jar {
-    onlyIf { false }
-}
-
+// 这段。一言难尽，但我不想动 (依托)
 tasks.build {
     doLast {
         val plugin = project(":plugin")
-        val file = file("${plugin.layout.buildDirectory.get()}/libs").listFiles()?.find { it.endsWith("plugin-$version.jar") }
+        val file =
+            file("${plugin.layout.buildDirectory.get()}/libs").listFiles()?.find { it.endsWith("plugin-$version.jar") }
 
         file?.copyTo(file("${project.layout.buildDirectory.get()}/libs/${project.name}-$version.jar"), true)
     }
@@ -31,25 +21,73 @@ tasks.build {
 }
 
 subprojects {
+
     apply<JavaPlugin>()
+    apply(plugin = "idea")
+    apply(plugin = "io.izzel.taboolib")
     apply(plugin = "org.jetbrains.kotlin.jvm")
-    apply(plugin = "maven-publish")
+
+    idea {
+        module {
+            isDownloadJavadoc = true
+            isDownloadSources = true
+        }
+    }
+
+    taboolib {
+        env {
+            install(
+                Basic,
+                Bukkit,
+                BukkitHook,
+                BukkitNMS,
+                BukkitNMSUtil,
+                BukkitUI,
+                BukkitUtil,
+                CommandHelper,
+                Database,
+                AlkaidRedis,
+                BukkitFakeOp,
+                DatabasePlayer,
+                I18n,
+                JavaScript,
+                Jexl,
+                Kether,
+                Metrics,
+                MinecraftChat,
+                XSeries,
+                PtcObject
+            )
+            repoTabooLib = "https://repo.aeoliancloud.com/repository/releases"
+        }
+        version {
+            taboolib = "6.2.3-91a5b18"
+            coroutines = null
+        }
+    }
 
     repositories {
+        maven("https://repo.aeoliancloud.com/repository/releases") { isAllowInsecureProtocol = true }
         mavenCentral()
+        maven("https://hub.spigotmc.org/nexus/content/groups/public/")
+        maven("http://sacredcraft.cn:8081/repository/releases") { isAllowInsecureProtocol = true }
+        maven("https://repo.codemc.io/repository/nms/")
+        maven("https://hub.spigotmc.org/nexus/content/groups/public/")
+        maven("https://repo.opencollab.dev/main/")
     }
 
     dependencies {
-        "api"(kotlin("stdlib")) // Dreeam - compileOnly -> api, For compatibility
+        compileOnly(kotlin("stdlib"))
     }
 
     tasks.withType<JavaCompile> {
         options.encoding = "UTF-8"
     }
 
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    tasks.withType<KotlinCompile>().configureEach {
         kotlinOptions {
             jvmTarget = "1.8"
+            freeCompilerArgs += listOf("-Xskip-prerelease-check","-Xallow-unstable-dependencies")
         }
     }
 
@@ -59,47 +97,4 @@ subprojects {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    val archiveName = if (project == rootProject)
-        rootProject.name.lowercase()
-    else "${rootProject.name.lowercase()}-${project.name.lowercase()}"
-
-    val sourceSets = extensions.getByName("sourceSets") as SourceSetContainer
-
-    task<Jar>("sourcesJar") {
-        from(sourceSets.named("main").get().allSource)
-        archiveClassifier.set("sources")
-    }
-
-    tasks.jar {
-        exclude("taboolib")
-    }
-
-    publishing {
-        repositories {
-            maven {
-                url = uri("https://repo.mcage.cn/repository/trplugins/")
-                credentials {
-                    username = project.findProperty("user").toString()
-                    password = project.findProperty("password").toString()
-                }
-                authentication {
-                    create<BasicAuthentication>("basic")
-                }
-            }
-        }
-        publications {
-            create<MavenPublication>("library") {
-                from(components["java"])
-                artifactId = archiveName
-
-                artifact(tasks["sourcesJar"])
-
-                pom {
-                    allprojects.forEach {
-                        repositories.addAll(it.repositories)
-                    }
-                }
-            }
-        }
-    }
 }

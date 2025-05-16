@@ -3,21 +3,22 @@ package trplugins.menu.util.bukkit
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.mojang.authlib.GameProfile
-import com.mojang.authlib.properties.Property
 import org.bukkit.Bukkit
+import org.bukkit.Material
+import org.bukkit.OfflinePlayer
+import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.SkullMeta
-import taboolib.common.platform.function.console
-import taboolib.common.platform.function.submit
 import taboolib.library.reflex.Reflex.Companion.getProperty
 import taboolib.library.reflex.Reflex.Companion.invokeMethod
-import taboolib.library.reflex.Reflex.Companion.setProperty
 import taboolib.library.xseries.XMaterial
-import taboolib.library.xseries.XSkull
+import taboolib.module.nms.MinecraftVersion
+import taboolib.platform.util.BukkitSkull
 import trplugins.menu.module.internal.hook.HookPlugin
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.net.URL
-import java.util.Base64
-import java.util.UUID
+import java.util.*
 
 /**
  * @author Arasple
@@ -25,44 +26,80 @@ import java.util.UUID
  */
 object Heads {
 
-    private val MOJANG_API = arrayOf(
-        "https://api.mojang.com/users/profiles/minecraft/",
-        "https://sessionserver.mojang.com/session/minecraft/profile/"
-    )
+    private const val USER_API = "https://api.mojang.com/users/profiles/minecraft/"
+    private const val SESSION_API = "https://sessionserver.mojang.com/session/minecraft/profile/"
 
-    private val DEFAULT_HEAD = XMaterial.PLAYER_HEAD.parseItem()!!
-    private val CACHED_PLAYER_TEXTURE = mutableMapOf<String, String?>()
+    private val JSON_PARSER = JsonParser()
+    private val DEFAULT_HEAD = XMaterial.PLAYER_HEAD.parseItem()!!.apply {
+        if (runCatching { Material.PLAYER_HEAD }.isFailure) {
+            durability = 3
+        }
+    }
     private val CACHED_SKULLS = mutableMapOf<String, ItemStack>()
+    private val VALUE = if (MinecraftVersion.major >= 1.20) "value" else "getValue"
+    private val NAME = if (MinecraftVersion.major >= 1.20) "name" else "getName"
+    private val USE_PROFILE = runCatching { OfflinePlayer::class.java.getDeclaredMethod("getPlayerProfile") }.isSuccess
 
-    fun cacheSize(): Pair<Int, Int> {
-        return CACHED_SKULLS.size to CACHED_PLAYER_TEXTURE.size
+    fun cacheSize(): Int {
+        return CACHED_SKULLS.size
     }
 
-    @Deprecated("Use getHeadX", ReplaceWith("Heads.getHeadX(id)"))
     fun getHead(id: String): ItemStack {
-        return if (id.length > 20) getCustomTextureHead(id) else getPlayerHead(id)
-    }
-
-    fun getHeadX(id: String): ItemStack =
-        CACHED_SKULLS.computeIfAbsent(id) {
-            (CACHED_SKULLS[it] ?: DEFAULT_HEAD).apply {
-                itemMeta = itemMeta?.let { m -> XSkull.applySkin(m, id) }
-            }
-        }
-
-    fun getPlayerHead(name: String): ItemStack {
-        if (CACHED_SKULLS.containsKey(name)) {
-            return CACHED_SKULLS[name] ?: DEFAULT_HEAD
+        return if (id.length <= 20) {
+            getPlayerHead(id)
+        } else if (id.length == 32) {
+            getPlayerHead(UUID.fromString(StringBuilder(id)
+                .insert(20, '-').insert(16, '-').insert(12, '-').insert(8, '-')
+                .toString()))
+        } else if (id.length == 36) {
+            getPlayerHead(UUID.fromString(id))
         } else {
-            CACHED_SKULLS[name] = DEFAULT_HEAD.clone()
-                .also { item -> playerTexture(name) { modifyTexture(it, item) } ?: return DEFAULT_HEAD }
-            return CACHED_SKULLS[name] ?: DEFAULT_HEAD
+            getCustomHead(id)
         }
     }
 
-    fun getCustomTextureHead(texture: String): ItemStack {
-        return CACHED_SKULLS.computeIfAbsent(texture) {
-            modifyTexture(texture, DEFAULT_HEAD.clone())
+    private fun getCustomHead(id: String): ItemStack = CACHED_SKULLS.computeIfAbsent(id) {
+        if (id.startsWith("http://textures.minecraft.net/texture/")) {
+            BukkitSkull.applySkull(id.substring(38))
+        } else {
+            BukkitSkull.applySkull(id)
+        }
+    }.clone()
+
+    private fun getPlayerHead(uniqueId: UUID): ItemStack {
+        val player = Bukkit.getPlayer(uniqueId)
+        if (player != null) {
+            return getPlayerHead(player)
+        }
+        val name = Bukkit.getOfflinePlayer(uniqueId).name
+        return if (name == null) DEFAULT_HEAD else getPlayerHead(name)
+    }
+
+    private fun getPlayerHead(name: String): ItemStack {
+        if (HookPlugin.getSkinsRestorer().isHooked) {
+            val texture: String? = HookPlugin.getSkinsRestorer().getPlayerSkinTexture(name)
+            return texture?.let { getCustomHead(it) } ?: DEFAULT_HEAD
+        }
+        val player = Bukkit.getPlayer(name)
+        if (player != null) {
+            return getPlayerHead(player)
+        }
+        val texture = seekTexture(name)
+        return if (texture == null) DEFAULT_HEAD else getCustomHead(texture)
+    }
+
+    private fun getPlayerHead(player: Player): ItemStack {
+        if (USE_PROFILE) {
+            return getCustomHead(player.playerProfile.textures.skin.toString())
+        } else {
+            val profile = player.invokeMethod<GameProfile>("getProfile")
+            profile?.properties?.get("textures")?.forEach { texture ->
+                if (texture != null) {
+                    return getCustomHead(texture.getProperty<String>(VALUE)!!)
+                }
+            }
+            val texture = seekTexture(player.name)
+            return if (texture == null) DEFAULT_HEAD else getCustomHead(texture)
         }
     }
 
@@ -74,68 +111,58 @@ object Heads {
         }
 
         meta.getProperty<GameProfile>("profile")?.properties?.values()?.forEach {
-            if (it.name == "textures") return it.value
+            if (it.getProperty<String>(NAME) == "textures") return it.getProperty<String>(VALUE)
         }
         return null
     }
 
-    /**
-     * PRIVATE UTILS
-     */
-    private fun playerTexture(name: String, block: (String) -> Unit): Unit? {
-        when {
-            HookPlugin.getSkinsRestorer().isHooked -> {
-                HookPlugin.getSkinsRestorer().getPlayerSkinTexture(name)?.also(block) ?: return null
-            }
-            Bukkit.getPlayer(name)?.isOnline == true -> {
-                Bukkit.getPlayer(name)!!.invokeMethod<GameProfile>("getProfile")?.properties?.get("textures")
-                    ?.find { it.value != null }?.value
-                    ?.also(block)
-                    ?: return null
-            }
-            else -> {
-                submit(async = true) {
-                    val profile = JsonParser().parse(fromURL("${MOJANG_API[0]}$name")) as? JsonObject
-                    if (profile == null) {
-                        console().sendMessage("§7[§3Texture§7] Texture player $name not found.")
-                        return@submit
-                    }
-                    val uuid = profile["id"].asString
-                    (JsonParser().parse(fromURL("${MOJANG_API[1]}$uuid")) as JsonObject).getAsJsonArray("properties")
-                        .forEach {
-                            if ("textures" == it.asJsonObject["name"].asString) {
-                                CACHED_PLAYER_TEXTURE[name] = it.asJsonObject["value"].asString.also(block)
-                            }
+    fun seekTexture(name: String): String? {
+        val user = urlJson(USER_API + name)
+        if (user != null && user.has("id")) {
+            val uuid = user["id"].asString
+            val session = urlJson(SESSION_API + uuid)
+            if (session != null) {
+                for (element in session.getAsJsonArray("properties")) {
+                    val property = element.asJsonObject
+                    if (property["name"].asString == "textures") {
+                        val value = property["value"].asString
+                        val texture = JSON_PARSER.parse(String(Base64.getDecoder().decode(value))).asJsonObject
+                        if (texture != null) {
+                            return texture["textures"].asJsonObject["SKIN"].asJsonObject["url"].asString
                         }
+                    }
                 }
             }
         }
-        return Unit
+        return null
     }
 
-    private fun modifyTexture(input: String, itemStack: ItemStack): ItemStack {
-        val meta = itemStack.itemMeta as SkullMeta
-        val profile = GameProfile(UUID.randomUUID(), "TrMenu")
-        val texture = if (input.length in 60..100) encodeTexture(input) else input
-
-        profile.properties.put("textures", Property("textures", texture, "TrMenu_TexturedSkull"))
-        meta.setProperty("profile", profile)
-        itemStack.itemMeta = meta
-        return itemStack
-    }
-
-    private fun encodeTexture(input: String): String {
-        val encoder = Base64.getEncoder()
-        return encoder.encodeToString("{\"textures\":{\"SKIN\":{\"url\":\"https://textures.minecraft.net/texture/$input\"}}}".toByteArray())
-    }
-
-    private fun fromURL(url: String): String {
-        return try {
-            String(URL(url).openStream().readBytes())
-        } catch (t: Throwable) {
-            ""
+    private fun urlJson(url: String): JsonObject? {
+        val text = urlText(url)
+        return if (text.trim { it <= ' ' }.isEmpty()) {
+            null
+        } else {
+            JSON_PARSER.parse(text).asJsonObject
         }
     }
 
-
+    private fun urlText(url: String): String {
+        try {
+            val con = URL(url).openConnection()
+            // Java 8 require user agent
+            con.addRequestProperty("User-Agent", "Mozilla/5.0")
+            con.getInputStream().use { `in` ->
+                BufferedReader(InputStreamReader(`in`)).use { reader ->
+                    val out = java.lang.StringBuilder()
+                    var line: String?
+                    while ((reader.readLine().also { line = it }) != null) {
+                        out.append(line)
+                    }
+                    return out.toString()
+                }
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+    }
 }

@@ -3,22 +3,27 @@ package trplugins.menu
 import org.bukkit.Bukkit
 import taboolib.common.platform.Plugin
 import taboolib.common.platform.function.console
+import taboolib.common.platform.function.pluginVersion
 import taboolib.module.configuration.Config
 import taboolib.module.configuration.Configuration
-import taboolib.module.kether.Kether
 import taboolib.module.lang.Language
 import taboolib.module.lang.sendLang
-import taboolib.platform.BukkitPlugin
+import taboolib.platform.util.bukkitPlugin
 import trplugins.menu.api.action.ActionHandle
+import trplugins.menu.api.action.impl.send.Tell
 import trplugins.menu.api.receptacle.provider.PlatformProvider
+import trplugins.menu.api.receptacle.vanilla.window.NMS
 import trplugins.menu.module.conf.Loader
 import trplugins.menu.module.conf.prop.RunningPerformance
 import trplugins.menu.module.display.MenuSession
 import trplugins.menu.module.display.session
 import trplugins.menu.module.internal.data.Metadata
+import trplugins.menu.module.internal.database.GlobalDataDao
+import trplugins.menu.module.internal.database.MetaDataDao
 import trplugins.menu.module.internal.hook.HookPlugin
 import trplugins.menu.module.internal.inputer.Inputer.Companion.cancelWords
 import trplugins.menu.module.internal.listener.ListenerItemInteract.interactCooldown
+import trplugins.menu.module.internal.script.Bindings
 import trplugins.menu.module.internal.script.evalScript
 import trplugins.menu.module.internal.service.RegisterCommands
 import trplugins.menu.module.internal.service.Shortcuts
@@ -33,7 +38,7 @@ object TrMenu : Plugin() {
     lateinit var SETTINGS: Configuration
         private set
 
-    val plugin by lazy { BukkitPlugin.getInstance() }
+    val plugin by lazy { bukkitPlugin }
 
     var performance = RunningPerformance.NORMAL
         private set
@@ -52,7 +57,9 @@ object TrMenu : Plugin() {
         onSettingsReload()
         Loader.loadMenus()
         Metadata.database
-        console().sendLang("Plugin-Enabled", plugin.description.version)
+        MetaDataDao.door
+        GlobalDataDao.door
+        console().sendLang("Plugin-Enabled", pluginVersion)
         console().sendLang("Plugin-Version")
         HookPlugin.printInfo()
     }
@@ -65,6 +72,15 @@ object TrMenu : Plugin() {
     }
 
     private fun onSettingsReload() {
+        Language.default = SETTINGS.getString("Language.Default") ?: "zh_CN"
+        MenuSession.langPlayer = SETTINGS.getString("Language.Player") ?: ""
+        SETTINGS.getConfigurationSection("Language.CodeTransfer")?.also {
+            Language.languageCodeTransfer.clear()
+            it.getKeys(false).forEach { lang ->
+                Language.languageCodeTransfer[lang] = it.getString(lang) ?: Language.default
+            }
+        }
+
         performance = kotlin.runCatching {
             RunningPerformance.valueOf(SETTINGS.getString("Options.Running-Performance") ?: "Normal")
         }.getOrNull() ?: RunningPerformance.NORMAL
@@ -73,12 +89,12 @@ object TrMenu : Plugin() {
         interactCooldown.reload()
         Shortcuts.Type.load()
         RegisterCommands.load()
-        Kether.isAllowToleranceParser = SETTINGS.getBoolean("Action.Kether.Allow-Tolerance-Parser", false)
-        if (SETTINGS.getBoolean("Options.Bedrock-Static-Inv", false)) {
-            PlatformProvider.compute()
-        } else {
-            PlatformProvider.provider = null
-        }
+        Bindings.load()
+        Tell.useComponent = SETTINGS.getBoolean("Action.Using-Component", true)
+        PlatformProvider.compute()
+        NMS.javaStaticInventory = SETTINGS.getBoolean("Options.Static-Inventory.Java", false)
+        NMS.bedrockStaticInventory = SETTINGS.getBoolean("Options.Static-Inventory.Bedrock", false)
+        NMS.createIdPacketInventory = SETTINGS.getBoolean("Options.Packet-Inventory.Create-Id", false)
     }
 
 }

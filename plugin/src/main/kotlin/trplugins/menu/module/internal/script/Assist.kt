@@ -1,14 +1,16 @@
-package trplugins.menu.module.internal.script.js
+package trplugins.menu.module.internal.script
 
 import me.clip.placeholderapi.PlaceholderAPI
 import org.apache.commons.lang3.math.NumberUtils
 import org.bukkit.Bukkit
+import org.bukkit.Color
 import org.bukkit.Material
 import org.bukkit.OfflinePlayer
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.PlayerInventory
 import taboolib.common.platform.function.adaptPlayer
+import taboolib.common.platform.function.warning
 import taboolib.common.util.random
 import taboolib.library.xseries.XMaterial
 import taboolib.module.chat.Components
@@ -28,7 +30,7 @@ import trplugins.menu.util.Bungees
 import trplugins.menu.util.ClassUtils
 import trplugins.menu.util.bukkit.Heads
 import trplugins.menu.util.bukkit.ItemMatcher
-import java.util.TreeMap
+import java.util.*
 
 
 /**
@@ -77,7 +79,6 @@ class Assist {
     fun addWhitelist(player: String): Boolean {
         return getOfflinePlayer(player).let {
             Bukkit.getWhitelistedPlayers().add(it)
-            true
         }
     }
 
@@ -85,11 +86,11 @@ class Assist {
         return Bukkit.getWhitelistedPlayers().removeIf { it.name.equals(player, true) }
     }
 
-    private fun getPlayer(player: String): Player? {
+    fun getPlayer(player: String): Player? {
         return Bukkit.getPlayerExact(player)
     }
 
-    private fun getOfflinePlayer(player: String): OfflinePlayer? {
+    fun getOfflinePlayer(player: String): OfflinePlayer? {
         return Bukkit.getOfflinePlayers().find { it.name.equals(player, true) }
     }
 
@@ -101,7 +102,7 @@ class Assist {
         return Bukkit.getOnlinePlayers().randomOrNull()
     }
 
-    private fun getPlayerInventory(player: String): PlayerInventory? {
+    fun getPlayerInventory(player: String): PlayerInventory? {
         return getPlayer(player)?.inventory
     }
 
@@ -117,7 +118,7 @@ class Assist {
     }
 
     // utils.getEquipment("Arasple", "HEAD")
-    private fun getEquipment(player: String, equipmentSlot: String): ItemStack? {
+    fun getEquipment(player: String, equipmentSlot: String): ItemStack? {
         return getPlayer(player)?.run {
             BukkitEquipment.getItems(this)[BukkitEquipment.fromNMS(equipmentSlot)]
         }
@@ -166,8 +167,26 @@ class Assist {
      * Internal - TabooLib Utils
      */
 
+    @Deprecated("Typo method name", ReplaceWith("getItemBuilder()"), DeprecationLevel.WARNING)
     fun getItemBuildr(): ItemBuilder {
+        warning("Assist#getItemBuildr() is deprecated, use getItemBuilder() instead.")
         return ItemBuilder(XMaterial.STONE)
+    }
+
+    fun getItemBuilder(): ItemBuilder {
+        return ItemBuilder(XMaterial.STONE)
+    }
+
+    fun materialOf(name: String): XMaterial {
+        return XMaterial.matchXMaterial(name).orElse(XMaterial.STONE);
+    }
+
+    fun colorOf(rgb: Int): Color {
+        return Color.fromRGB(rgb)
+    }
+
+    fun getIconSlots(icon: String, session: MenuSession): List<Int>? {
+        return session.menu?.getIcon(icon)?.position?.currentPosition(session);
     }
 
     fun getTellraw(): Components {
@@ -185,7 +204,7 @@ class Assist {
         return hasItem(getPlayer(player), identify)
     }
 
-    private fun hasItem(player: Player?, identify: String): Boolean {
+    fun hasItem(player: Player?, identify: String): Boolean {
         return player?.let { ItemMatcher.of(identify).hasItem(it) } ?: false
     }
 
@@ -231,12 +250,12 @@ class Assist {
         return hasPoints(player, toInt(points))
     }
 
-    private fun hasPoints(player: Player, points: Int): Boolean {
+    fun hasPoints(player: Player, points: Int): Boolean {
         return HookPlugin.getPlayerPoints().hasPoints(player, points)
     }
 
     fun getHead(name: String): ItemStack {
-        return Heads.getHeadX(name)
+        return Heads.getHead(name)
     }
 
     /**
@@ -267,11 +286,11 @@ class Assist {
         }
     }
 
-    private fun toInt(number: String): Int {
+    fun toInt(number: String): Int {
         return number.toIntOrNull() ?: 0
     }
 
-    private fun toDouble(number: String, def: Double = 0.0): Double {
+    fun toDouble(number: String, def: Double = 0.0): Double {
         return number.toDoubleOrNull() ?: def
     }
 
@@ -279,7 +298,7 @@ class Assist {
         return toRoman(toInt(number))
     }
 
-    private fun toRoman(number: Int): String {
+    fun toRoman(number: Int): String {
         if (number < 1) return ""
         val mapNumber = romanNumbers.floorKey(number)
         return if (mapNumber == number) romanNumbers[number]!! else romanNumbers[mapNumber] + toRoman(number - mapNumber)
@@ -347,9 +366,26 @@ class Assist {
      * NBT
      */
 
+    /**
+     * @param isCustom 仅针对 1.20.5+, 是否读取为 CUSTOM_DATA 的 DataComponentType
+     */
+    fun getNBT(itemStack: ItemStack, string: String, isCustom: Boolean = true): String? {
+        val itemTag = itemStack.getItemTag(isCustom)
+        return itemTag[string]?.asString()
+    }
+
     fun getNBT(itemStack: ItemStack, string: String): String? {
         val itemTag = itemStack.getItemTag()
         return itemTag[string]?.asString()
+    }
+
+    /**
+     * @param isCustom 仅针对 1.20.5+, 是否读取为 CUSTOM_DATA 的 DataComponentType
+     */
+    fun setNBT(itemStack: ItemStack, key: String, value: String, isCustom: Boolean = true): ItemStack {
+        val itemTag = itemStack.getItemTag(isCustom)
+        itemTag[key] = ItemTagData(value)
+        return itemStack.also { itemTag.saveTo(it, isCustom) }
     }
 
     fun setNBT(itemStack: ItemStack, key: String, value: String): ItemStack {

@@ -23,11 +23,11 @@ object CommandTest : CommandExpression {
                 it.rows = 3
             }
 
-            chest.type.totalSlots.forEach { chest.setElement(XMaterial.entries.toTypedArray().random().parseItem(), it) }
+            chest.type.totalSlots.forEach { chest.setElement(XMaterial.values().random().parseItem(), it) }
             chest.open(player)
 
             val task = submit(delay = 20, period = 10, async = false) {
-                chest.title = (0..20).random().toString()
+                chest.title((0..20).random().toString())
             }
             submit(delay = (20 * 20)) {
                 task.cancel()

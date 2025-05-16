@@ -1,12 +1,11 @@
 package trplugins.menu.module.internal.hook
 
 import taboolib.common.LifeCycle
-import taboolib.common.io.runningClasses
 import taboolib.common.platform.SkipTo
 import taboolib.common.platform.function.console
 import taboolib.module.lang.sendLang
 import trplugins.menu.module.internal.hook.impl.*
-import java.lang.reflect.Modifier
+import trplugins.menu.util.ClassUtils
 import kotlin.reflect.KClass
 
 /**
@@ -24,11 +23,8 @@ object HookPlugin {
 
     private val registry by lazy {
         mutableListOf<HookAbstract>().also {
-            runningClasses.forEach { `class` ->
-                if (Modifier.isAbstract(`class`.modifiers)) return@forEach
-                if (`class`.superclass != HookAbstract::class.java) return@forEach
-
-                it.add(`class`.asSubclass(HookAbstract::class.java).getConstructor().newInstance())
+            ClassUtils.subClasses(HookAbstract::class.java) { hook ->
+                it.add(hook.getConstructor().newInstance())
             }
         }.toTypedArray()
     }
@@ -82,12 +78,56 @@ object HookPlugin {
         return get(HookTriton::class.java)
     }
 
+    fun getMMOItems(): HookMMOItems {
+        return get(HookMMOItems::class.java)
+    }
+
     fun getNBTAPI(): HookNBTAPI {
         return get(HookNBTAPI::class.java)
     }
 
     fun getMagicCosmetics(): HookMagicCosmetics {
         return get(HookMagicCosmetics::class.java)
+    }
+
+    fun getMagicGem(): HookMagicGem {
+        return get(HookMagicGem::class.java)
+    }
+
+    fun getNeigeItem(): HookNeigeItems {
+        return get(HookNeigeItems::class.java)
+    }
+
+    fun getEcoItem(): HookEcoItems {
+        return get(HookEcoItems::class.java)
+    }
+
+    fun getHMCCosmetics(): HookHMCCosmetics {
+        return get(HookHMCCosmetics::class.java)
+    }
+
+    fun getMythicMobs(): HookMythicMobs {
+        return get(HookMythicMobs::class.java)
+    }
+
+    fun getAzureFlow(): HookAzureFlow {
+        return get(HookAzureFlow::class.java)
+    }
+
+    fun getGraalvm(): HookGraalJS {
+        return HookGraalJS()
+    }
+
+    fun getPxRpg(): HookPxRpg {
+        return get(HookPxRpg::class.java)
+    }
+
+    fun getNexo(): HookNexo {
+        return get(HookNexo::class.java)
+    }
+
+    fun getCraftEngine(): HookCraftEngine {
+        return get(HookCraftEngine::class.java)
     }
 
 }

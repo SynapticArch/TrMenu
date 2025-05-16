@@ -12,7 +12,7 @@ import trplugins.menu.api.receptacle.setViewingReceptacle
  * @author Arasple
  * @date 2020/11/29 10:38
  */
-open class WindowReceptacle(var type: WindowLayout, title: String = type.toBukkitType().defaultTitle) : Receptacle<ItemStack>(type) {
+open class WindowReceptacle(var type: WindowLayout, override var title: String = type.toBukkitType().defaultTitle) : Receptacle<ItemStack>(type) {
 
     private var viewer: Player? = null
 
@@ -31,14 +31,6 @@ open class WindowReceptacle(var type: WindowLayout, title: String = type.toBukki
             return field++
         }
 
-    override var title = title
-        set(value) {
-            field = value
-            submit(delay = 3, async = true) {
-                initializationPackets()
-            }
-        }
-
     fun hidePlayerInventory(hidePlayerInventory: Boolean) {
         this.hidePlayerInventory = hidePlayerInventory
     }
@@ -52,11 +44,10 @@ open class WindowReceptacle(var type: WindowLayout, title: String = type.toBukki
         return getElement(slot) != null
     }
 
-    override fun setElement(element: ItemStack?, vararg slots: Int, display: Boolean) {
-        slots.forEach { contents[it] = element }
-        if (display && viewer != null) {
-            slots.forEach { nmsProxy<NMS>().sendWindowsSetSlot(viewer!!, slot = it, itemStack = element, stateId = stateId) }
-        }
+    override fun setElement(element: ItemStack?, slot: Int, display: Boolean) {
+        contents[slot] = element
+        if (!display || viewer == null) return
+        nmsProxy<NMS>().sendWindowsSetSlot(viewer!!, slot = slot, itemStack = element, stateId = stateId)
     }
 
     override fun clear(display: Boolean) {
@@ -96,6 +87,21 @@ open class WindowReceptacle(var type: WindowLayout, title: String = type.toBukki
         }
     }
 
+    override fun title(value: String, update: Boolean) {
+        title = value
+        if (update) {
+            submit(delay = 3, async = true) {
+                initializationPackets()
+            }
+        }
+    }
+
+    override fun property(id: Int, value: Int) {
+        if (viewer != null) {
+            nmsProxy<NMS>().sendWindowsUpdateData(viewer!!, id = id, value = value)
+        }
+    }
+
     override fun callEventClick(event: ReceptacleInteractEvent<ItemStack>) {
         if (viewer != null) {
             onClick(viewer!!, event)
@@ -105,6 +111,7 @@ open class WindowReceptacle(var type: WindowLayout, title: String = type.toBukki
     private fun initializationPackets() {
         if (viewer != null) {
             nmsProxy<NMS>().sendWindowsOpen(viewer!!, title = title, type = type)
+            nmsProxy<NMS>().sendWindowsSetSlot(viewer!!, windowId = 0, slot = 45)
             refresh()
         }
     }

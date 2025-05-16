@@ -10,6 +10,7 @@ import trplugins.menu.api.event.MenuOpenEvent
 import trplugins.menu.module.display.Menu
 import trplugins.menu.module.display.MenuSession
 import trplugins.menu.module.internal.data.Metadata
+import trplugins.menu.module.internal.script.jexl.JexlAgent
 import trplugins.menu.module.internal.script.js.JavaScriptAgent
 import trplugins.menu.util.ignoreCase
 
@@ -20,30 +21,32 @@ import trplugins.menu.util.ignoreCase
 object HookPlaceholderAPI : PlaceholderExpansion {
 
     private val enabledParseJavaScript get() = TrMenu.SETTINGS.getBoolean("Options.Placeholders.JavaScript-Parse", false)
+    private val enabledParseJexlScript get() = TrMenu.SETTINGS.getBoolean("Options.Placeholders.Jexl-Parse", false)
 
     override val identifier = pluginId
 
-    override fun onPlaceholderRequest(player: Player?, params: String): String {
-        if (player?.isOnline == true) {
-            val session = MenuSession.getSession(player)
-            val args = params.split("_")
-            val key = args.getOrElse(1) { "" }
-            val value = { args.slice(1 until args.size).joinToString("_") }
+    override fun onPlaceholderRequest(player: Player?, args: String): String {
+        player ?: return "___"
 
-            return kotlin.runCatching { when (args[0].lowercase()) {
-                "menus" -> Menu.menus.size
-                "args" -> session.arguments[key.toIntOrNull() ?: 0]
-                "meta" -> Metadata.getMeta(player)[key]
-                "data" -> Metadata.getData(player)[key]
-                "globaldata" -> runCatching { Metadata.globalData[value()].toString() }.getOrElse { "null" }
-                "node" -> session.menu?.conf?.let { it[it.ignoreCase(value())].toString() }.toString()
-                "menu" -> menu(session, args)
-                "js" -> if (enabledParseJavaScript) if (args.size > 1) JavaScriptAgent.eval(session, args[1]).asString() else "" else "UNABLE_PARSE"
-                else -> ""
-            } }.getOrNull().toString()
-        }
+        val session = MenuSession.getSession(player)
+        val params = args.split("_")
+        val key = params.getOrElse(1) { "" }
+        val value = { params.slice(1 until params.size).joinToString("_") }
 
-        return "__"
+        return kotlin.runCatching { when (params[0].lowercase()) {
+            "menus" -> Menu.menus.size
+            "args" -> session.arguments[key.toIntOrNull() ?: 0]
+            "meta" -> Metadata.getMeta(player)[key]
+            "data" -> Metadata.getData(player)[key]
+            "globaldata" -> runCatching { Metadata.globalData[value()].toString() }.getOrElse { "null" }
+            "node" -> session.menu?.conf?.let { it[it.ignoreCase(value())].toString() }.toString()
+            "menu" -> menu(session, params)
+            "locale" -> session.locale
+            "js" -> if (enabledParseJavaScript) if (params.size > 1) JavaScriptAgent.eval(session, params[1]).asString() else "" else "UNABLE_PARSE"
+            "jexl" -> if (enabledParseJexlScript) if (params.size > 1) JexlAgent.eval(session, params[1]).asString() else "" else "UNABLE_PARSE"
+            else -> ""
+        } }.getOrNull().toString()
+
     }
 
     private fun menu(session: MenuSession, params: List<String>): String {
@@ -52,7 +55,7 @@ object HookPlaceholderAPI : PlaceholderExpansion {
             "pages" -> session.menu?.layout?.layouts?.size.toString()
             "next" -> (session.page + 1).toString()
             "prev" -> (session.page - 1).toString()
-            "title" -> session.menu?.settings?.title?.get(session.id).toString()
+            "title" -> session.menu?.settings?.title(session)?.get(session.id).toString()
             else -> ""
         }
     }

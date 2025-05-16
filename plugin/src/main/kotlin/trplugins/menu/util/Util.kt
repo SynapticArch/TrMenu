@@ -1,20 +1,22 @@
 package trplugins.menu.util
 
-import taboolib.common.io.getInstance
 import taboolib.common.io.runningClasses
+import taboolib.common.platform.function.console
 import taboolib.library.reflex.Reflex.Companion.getProperty
 import taboolib.module.configuration.Configuration
-import java.lang.reflect.Modifier
+import taboolib.module.lang.sendErrorMessage
 
 /**
  * @author Arasple
  * @date 2021/2/19 22:40
  */
 fun Throwable.print(title: String) {
-    println("§c[TrMenu] §8$title")
-    println("         §8${localizedMessage}")
+    console().sendErrorMessage("&8$title")
+//    println("§c[TrMenu] §8$title")
+    console().sendErrorMessage("         §8${localizedMessage}")
+//    println("         §8${localizedMessage}")
     stackTrace.forEach {
-        println("         §8$it")
+        console().sendErrorMessage("         §8$it")
     }
 }
 
@@ -45,32 +47,6 @@ inline fun <reified T> fromClassesCollect(`super`: Class<T>) = mutableListOf<T>(
     }
 }
 */
-
-fun <T> List<Class<*>>.fromClassesCollect(`super`: Class<T>, newInstance: Boolean = false, deep: Boolean = false) =
-    toTypedArray().fromClassesCollect(`super`, newInstance, deep)
-
-fun <T> Array<Class<*>>.fromClassesCollect(`super`: Class<T>, newInstance: Boolean = false, deep: Boolean = false): MutableList<T> =
-    mutableListOf<T>().also { list ->
-        this.forEach { `class` ->
-            `class`.fromClassCollect(`super`, newInstance, deep).forEach { list.add(it) }
-        }
-    }
-
-@Suppress("UNCHECKED_CAST")
-fun <T> Class<*>.fromClassCollect(`super`: Class<T>, newInstance: Boolean = false, deep: Boolean = false): MutableList<T> =
-    mutableListOf<T>().also { list ->
-        if (Modifier.isAbstract(this.modifiers)) return@also
-        runCatching {
-            getInstance(newInstance)!!.get() as T
-        }.getOrNull().also {
-            list.add(it ?: return@also)
-        }
-
-        if (deep) {
-            this.classes.fromClassesCollect(`super`, deep).forEach { list.add(it) }
-        }
-    }
-
 
 
 @Suppress("UNCHECKED_CAST")

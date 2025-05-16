@@ -9,11 +9,11 @@ import trplugins.menu.util.conf.Property
  * @author Rubenicos
  * @date 2021/11/23 14:59
  */
-abstract class Reaction(val handle: ActionHandle, val priority: Int) {
+abstract class Reaction(val handle: ActionHandle, var priority: Int) {
 
     abstract fun isEmpty(): Boolean
 
-    abstract fun getActions(player: ProxyPlayer): List<ActionEntry>
+    abstract fun getIterator(player: ProxyPlayer): Iterator<ActionEntry>
 
     companion object {
         fun of(handle: ActionHandle, priority: Int, any: Any): Reaction? {

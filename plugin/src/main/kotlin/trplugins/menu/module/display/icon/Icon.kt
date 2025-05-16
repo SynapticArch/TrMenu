@@ -4,7 +4,6 @@ import taboolib.common.platform.function.submit
 import trplugins.menu.api.menu.IIcon
 import trplugins.menu.module.display.MenuSession
 import trplugins.menu.module.internal.script.evalScript
-import trplugins.menu.module.internal.service.Performance
 import trplugins.menu.util.collections.IndivList
 
 /**
@@ -14,14 +13,14 @@ import trplugins.menu.util.collections.IndivList
 class Icon(
     val id: String,
     private val refresh: Long,
-    update: Array<Int>,
+    private val update: Array<Int>,
     val position: Position,
     val defIcon: IconProperty,
     val subs: IndivList<IconProperty>
 ) : IIcon {
 
     override fun startup(session: MenuSession) {
-        update.forEach { (period, frames) ->
+        update(session).forEach { (period, frames) ->
             session.arrange(
                 submit(delay = 10, period = period, async = true) {
                     onUpdate(session, frames)
@@ -40,34 +39,32 @@ class Icon(
     }
 
     override fun onUpdate(session: MenuSession, frames: Set<Int>) {
-        Performance.check("Menu:Icon:Update") {
-            val menuId = session.menu?.id // 缓存菜单id避免打开下一个菜单出现图标覆盖
-            val icon = getProperty(session)
-            frames.forEach {
-                when (it) {
-                    // Position
-                    3 -> {
-                        val previous = position.currentPosition(session)
-                        position.cycleIndex(session)
-                        position.updatePosition(session)
-                        val exclude = position.currentPosition(session).let { current ->
-                            return@let previous.filter { pre -> !current.contains(pre) }
-                        }
-                        settingItem(session, icon, menuId)
-                        session.receptacle?.setElement(null, exclude)
+        val menuId = session.menu?.id // 缓存菜单id避免打开下一个菜单出现图标覆盖
+        val icon = getProperty(session)
+        frames.forEach {
+            when (it) {
+                // Position
+                3 -> {
+                    val previous = position.currentPosition(session)
+                    position.cycleIndex(session)
+                    position.updatePosition(session)
+                    val exclude = position.currentPosition(session).let { current ->
+                        return@let previous.filter { pre -> !current.contains(pre) }
                     }
-                    // Texture, Name, Lore
-                    else -> {
-                        val display = icon.display
-                        when (it) {
-                            0 -> display.updateTexture(session)
-                            1 -> display.updateName(session)
-                            2 -> display.updateLore(session)
-                            else -> {
-                            }
+                    settingItem(session, icon, menuId)
+                    session.receptacle?.setElement(null, exclude)
+                }
+                // Texture, Name, Lore
+                else -> {
+                    val display = icon.display
+                    when (it) {
+                        0 -> display.updateTexture(session)
+                        1 -> display.updateName(session)
+                        2 -> display.updateLore(session)
+                        else -> {
                         }
-                        settingItem(session, icon, menuId)
                     }
+                    settingItem(session, icon, menuId)
                 }
             }
         }
@@ -89,8 +86,8 @@ class Icon(
         position.reset(session)
         val resetIcon: (IconProperty) -> Unit = {
             it.display.texture.reset(session.id)
-            it.display.name.reset(session.id)
-            it.display.lore.reset(session.id)
+            it.display.name(session).reset(session.id)
+            it.display.lore(session).reset(session.id)
             it.display.cache.remove(session.id)
         }
         resetIcon(defIcon)
@@ -108,7 +105,7 @@ class Icon(
     /**
      * 更新周期
      */
-    internal val update: Map<Long, Set<Int>> = kotlin.run {
+    internal fun update(session: MenuSession): Map<Long, Set<Int>> {
         val result = mutableMapOf<Long, MutableSet<Int>>()
         val fallback = update.maxOrNull() ?: -1
         val array = Array(4) { update.getOrElse(it) { fallback } }
@@ -117,8 +114,8 @@ class Icon(
             if (index <= 4 && i > 0) {
                 val allow = when (index) {
                     0 -> match { it.isTextureUpdatable() }
-                    1 -> match { it.isNameUpdatable() }
-                    2 -> match { it.isLoreUpdatable() }
+                    1 -> match { it.isNameUpdatable(session) }
+                    2 -> match { it.isLoreUpdatable(session) }
                     3 -> match { position.isUpdatable() }
                     else -> false
                 }
@@ -129,7 +126,7 @@ class Icon(
             if (array[it] > 0) result.computeIfAbsent(array[it].toLong()) { mutableSetOf() }.add(it)
         }
 
-        result
+        return result
     }
 
     private fun match(matcher: (IconProperty) -> Boolean): Boolean {

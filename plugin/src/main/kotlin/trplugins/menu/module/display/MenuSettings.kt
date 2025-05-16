@@ -19,10 +19,11 @@ import trplugins.menu.util.collections.CycleList
 class MenuSettings(
     val title: CycleList<String>,
     val titleUpdate: Int,
+    val properties: Map<Int, Int?>,
     val enableArguments: Boolean = true,
     val defaultArguments: Array<String> = arrayOf(),
     val freeSlots: Set<Int> = setOf(),
-    val defaultLayout: Int,
+    val defaultLayout: Any,
     expansions: Array<String>,
     val minClickDelay: Int,
     val hidePlayerInventory: Boolean,
@@ -54,6 +55,19 @@ class MenuSettings(
                 arrayOf("PLUGINCORE")
             }
         }
+
+    private val titleI18n = HashMap<String, CycleList<String>>()
+
+    fun addI18nTitle(locale: String, title: CycleList<String>) {
+        titleI18n[locale] = title
+    }
+
+    fun title(session: MenuSession): CycleList<String> {
+        if (titleI18n.isEmpty()) {
+            return title
+        }
+        return titleI18n[session.locale] ?: title
+    }
 
     /**
      * 匹配菜单绑定的命令
@@ -94,6 +108,14 @@ class MenuSettings(
         for (i in 0..index) commands = commands.toMutableList().also { it.removeAt(0) }
 
         return commands.toMutableList().also { it.add(0, command ?: return@also) }
+    }
+
+    fun determinePage(session: MenuSession): Int {
+        return if (defaultLayout is Int) {
+            defaultLayout
+        } else {
+            session.parse(defaultLayout as String).toIntOrNull() ?: 0
+        }
     }
 
 }

@@ -91,7 +91,8 @@ object ItemHelper {
 
     fun fromJson(json: String): ItemStack? {
         try {
-            if (HookPlugin.getNBTAPI().isHooked) {
+            // 自动判别老式/新式 NBT 标签
+            if (HookPlugin.getNBTAPI().isHooked && json.startsWith("{\"item\":")) {
                 return HookPlugin.getNBTAPI().fromJson(json)
             }
             val parse = JsonParser().parse(json)
@@ -113,14 +114,7 @@ object ItemHelper {
                     itemStack?.amount = it.asInt
                 }
                 val meta = parse["meta"]
-                return if (meta != null) itemStack.also {
-                    it?.let { it1 ->
-                        ItemTag.fromLegacyJson(meta.toString()).saveTo(
-                            it1
-                        )
-                    }
-                }
-                else itemStack
+                return meta?.let { itemStack?.also { ItemTag.fromLegacyJson(it.toString()).saveTo(it) } } ?: itemStack
             }
             return null
         } catch (t: Throwable) {

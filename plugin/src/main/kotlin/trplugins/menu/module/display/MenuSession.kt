@@ -6,18 +6,19 @@ import taboolib.common.platform.function.submitAsync
 import taboolib.common.platform.service.PlatformExecutor
 import taboolib.common.util.replaceWithOrder
 import taboolib.library.reflex.Reflex.Companion.getProperty
-import taboolib.module.chat.colored
 import taboolib.module.lang.Language
 import taboolib.platform.compat.replacePlaceholder
 import trplugins.menu.api.event.MenuCloseEvent
 import trplugins.menu.api.receptacle.vanilla.window.WindowReceptacle
+import trplugins.menu.module.display.dialog.model.DialogRuntimeState
+import trplugins.menu.module.display.dialog.runtime.DialogMenuRenderer
 import trplugins.menu.module.display.icon.Icon
 import trplugins.menu.module.display.icon.IconProperty
 import trplugins.menu.module.display.layout.Layout
 import trplugins.menu.module.internal.script.FunctionParser
-import trplugins.menu.util.parseGradients
-import trplugins.menu.util.parseRainbow
+import trplugins.menu.util.colorify
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * @author Arasple
@@ -29,7 +30,9 @@ class MenuSession(
     var page: Int,
     arguments: Array<String>,
     var agent: Player = viewer,
-    var receptacle: WindowReceptacle? = null
+    var receptacle: WindowReceptacle? = null,
+    var renderType: MenuRenderType? = null,
+    var dialogState: DialogRuntimeState? = null
 ) {
 
     /**
@@ -84,6 +87,9 @@ class MenuSession(
     // 临时任务（切换页码时允许删除）
     private val temporaries = mutableSetOf<PlatformExecutor.PlatformTask>()
 
+    // 缓存菜单节点，避免菜单关闭后无法读取
+    private var nodeCache: Map<String, Any?> = emptyMap()
+
     var locale: String = kotlin.run {
         if (langPlayer.isNotBlank()) {
             // Avoid ConcurrentModificationException
@@ -132,9 +138,7 @@ class MenuSession(
         val funced = FunctionParser.parse(placeholderPlayer, string) { type, value ->
             when (type) {
                 "node", "nodes", "n" -> parseNode(value) { key ->
-                    val config = menu?.conf ?: return@parseNode null
-                    val foundKey = config.getKeys(true).find { it.equals(key, ignoreCase = true) } ?: return@parseNode null
-                    config[foundKey]
+                    getNodeValue(key)
                 }
                 "lang" -> parseNode(value) { key ->
                     menu?.getLocaleValue(locale, key)
@@ -143,13 +147,52 @@ class MenuSession(
             }
         }
         val content =
-            (if (preColor) funced else funced.colored().parseRainbow().parseGradients()).replaceWithOrder(*arguments)
+            (if (preColor) funced else funced.colorify()).replaceWithOrder(*arguments).replaceWithOrder(*implicitArguments)
         val papi = content.replacePlaceholder(placeholderPlayer)
-        return if (preColor) papi else papi.colored().parseRainbow().parseGradients()
+
+        return if (preColor) papi else papi.colorify()
+    }
+
+    /**
+     * 处理标题字符串，仅替换函数变量与占位符，不进行颜色处理
+     * 颜色处理交由下游的 TabooLib component() 管道完成，避免
+     * BungeeCord §x 格式与 SimpleComponent parseToHexColor 的兼容问题
+     */
+    fun parseTitle(string: String): String {
+        val funced = FunctionParser.parse(placeholderPlayer, string) { type, value ->
+            when (type) {
+                "node", "nodes", "n" -> parseNode(value) { key ->
+                    getNodeValue(key)
+                }
+                "lang" -> parseNode(value) { key ->
+                    menu?.getLocaleValue(locale, key)
+                }
+                else -> null
+            }
+        }
+        return funced
+            .replaceWithOrder(*arguments)
+            .replaceWithOrder(*implicitArguments)
+            .replacePlaceholder(placeholderPlayer)
     }
 
     fun parse(string: List<String>): List<String> {
         return string.map { parse(it) }
+    }
+
+    fun cacheNodes() {
+        val config = menu?.conf
+        nodeCache = config?.getKeys(true)?.associateBy({ it.lowercase() }) { config[it] } ?: emptyMap()
+    }
+
+    fun getNodeValue(key: String): Any? {
+        val normalizedKey = key.lowercase()
+        if (nodeCache.containsKey(normalizedKey)) {
+            return nodeCache[normalizedKey]
+        }
+        val config = menu?.conf ?: return null
+        val foundKey = config.getKeys(true).find { it.equals(key, ignoreCase = true) } ?: return null
+        return config[foundKey]
     }
 
     private fun parseNode(node: String, valueSupplier: (String) -> Any?): String? {
@@ -202,6 +245,8 @@ class MenuSession(
         page = -1
         agent = viewer
         receptacle = null
+        renderType = null
+        dialogState = null
     }
 
     fun shutTemps() {
@@ -219,7 +264,11 @@ class MenuSession(
      */
     fun close(closePacket: Boolean, updateInventory: Boolean) {
         MenuCloseEvent(this).call()
-        receptacle?.close(closePacket)
+        if (renderType == MenuRenderType.DIALOG) {
+            DialogMenuRenderer.close(this, closePacket)
+        } else {
+            receptacle?.close(closePacket)
+        }
         if (updateInventory) viewer.updateInventory()
     }
 
@@ -299,7 +348,7 @@ class MenuSession(
         private var UID = 0
 
         @JvmField
-        val SESSIONS = mutableMapOf<UUID, MenuSession>()
+        val SESSIONS = ConcurrentHashMap<UUID, MenuSession>()
         var langPlayer: String = ""
 
         fun getSession(player: Player): MenuSession {

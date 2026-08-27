@@ -3,6 +3,7 @@ package trplugins.menu.module.conf
 import org.bukkit.Bukkit
 import org.bukkit.command.CommandSender
 import taboolib.common.platform.function.console
+import taboolib.common.platform.function.getDataFolder
 import taboolib.common.platform.function.releaseResourceFile
 import taboolib.module.lang.sendLang
 import taboolib.platform.util.sendLang
@@ -21,15 +22,30 @@ import java.io.File
  */
 object Loader {
 
+    private val defaults = arrayOf(
+        "Example.yml",
+        "Demo-Buttons.yml",
+        "Profile.yml",
+        "Dialog-Example.yml",
+        "Dialog-Confirmation-Example.yml",
+        "Dialog-Layout-Example.yml",
+        "shop-example/Shop-Categories.yml",
+        "shop-example/categories/Shop-Ores.yml",
+        "shop-example/handler/Shop-Handler-Purchase.yml",
+        "shop-example/handler/Shop-Handler-Sell.yml",
+    )
+
     private val folder by lazy {
         Menu.menus.clear()
-        val folder = File(TrMenu.plugin.dataFolder, "menus")
+        val folder = File(getDataFolder(), "menus")
 
         if (!folder.exists()) {
             arrayOf(
                 "Example.yml",
                 "Demo-Buttons.yml",
                 "Profile.yml",
+                "Dialog-Example.yml",
+                "Dialog-Layout-Example.yml",
                 "shop-example/Shop-Categories.yml",
                 "shop-example/categories/Shop-Ores.yml",
                 "shop-example/handler/Shop-Handler-Purchase.yml",
@@ -52,8 +68,6 @@ object Loader {
             it.forSessions { it.close(true, updateInventory = true) }
             true
         }
-
-        val errors = mutableListOf<String>()
 
         val files = mutableListOf<File>().also {
             it.addAll(filterMenuFiles(folder))
@@ -81,7 +95,7 @@ object Loader {
                     result = MenuSerializer.serializeMenu(it)
                 } catch (t: Throwable) {
                     return@start SerialzeResult(SerialzeResult.Type.MENU, SerialzeResult.State.FAILED).also {
-                        t.message?.let { msg -> it.errors.add(msg) }
+                        it.submitError(t)
                     }
                 }
                 if (result.state == SerialzeResult.State.IGNORE) {
@@ -89,7 +103,7 @@ object Loader {
                 }
                 if (result.succeed() && TrMenu.SETTINGS.getBoolean("Loader.Listen-Files", true)) {
                     listen(it)
-                } else errors.addAll(result.errors)
+                }
                 result
             },
             // success
@@ -112,7 +126,7 @@ object Loader {
                                 result.first.nameWithoutExtension,
                                 result.second.type.name
                             )
-                            result.second.errors.forEach { console().sendMessage("    §8$it") }
+                            result.second.printStackTrace()
                             console().sendMessage("")
                         }
                         Menu.menus.add(menu)
@@ -138,7 +152,7 @@ object Loader {
                             file.nameWithoutExtension,
                             it.type.name
                         )
-                        it.errors.forEach { console().sendMessage("    §8$it") }
+                        it.printStackTrace()
                         console().sendMessage("")
                     }
                 }

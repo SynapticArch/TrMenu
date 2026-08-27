@@ -1,8 +1,10 @@
 package trplugins.menu.module.internal.hook
 
 import taboolib.common.LifeCycle
+import taboolib.common.platform.Awake
 import taboolib.common.platform.SkipTo
 import taboolib.common.platform.function.console
+import taboolib.library.reflex.Reflex.Companion.invokeConstructor
 import taboolib.module.lang.sendLang
 import trplugins.menu.module.internal.hook.impl.*
 import trplugins.menu.util.ClassUtils
@@ -21,10 +23,19 @@ object HookPlugin {
         }
     }
 
+    /**
+     * 服务器全部插件加载完成后，统一通知各 Hook 做一次依赖于
+     * 第三方插件 onEnable 完成的初始化工作（例如缓存解析结果）。
+     */
+    @Awake(LifeCycle.ACTIVE)
+    fun onServerActive() {
+        registry.forEach { runCatching { it.onServerActive() } }
+    }
+
     private val registry by lazy {
         mutableListOf<HookAbstract>().also {
             ClassUtils.subClasses(HookAbstract::class.java) { hook ->
-                it.add(hook.getConstructor().newInstance())
+                it.add(hook.invokeConstructor())
             }
         }.toTypedArray()
     }
@@ -98,6 +109,10 @@ object HookPlugin {
         return get(HookNeigeItems::class.java)
     }
 
+    fun getMeowEco(): HookMeowEco {
+        return get(HookMeowEco::class.java)
+    }
+
     fun getEcoItem(): HookEcoItems {
         return get(HookEcoItems::class.java)
     }
@@ -128,6 +143,10 @@ object HookPlugin {
 
     fun getCraftEngine(): HookCraftEngine {
         return get(HookCraftEngine::class.java)
+    }
+
+    fun getNovaScript(): HookNovaScript {
+        return get(HookNovaScript::class.java)
     }
 
 }

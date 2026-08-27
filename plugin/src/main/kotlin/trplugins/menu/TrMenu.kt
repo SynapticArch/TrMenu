@@ -8,8 +8,10 @@ import taboolib.module.configuration.Config
 import taboolib.module.configuration.Configuration
 import taboolib.module.lang.Language
 import taboolib.module.lang.sendLang
+import taboolib.module.nms.MinecraftVersion
 import taboolib.platform.util.bukkitPlugin
 import trplugins.menu.api.action.ActionHandle
+import trplugins.menu.api.action.impl.menu.SetTitle
 import trplugins.menu.api.action.impl.send.Tell
 import trplugins.menu.api.receptacle.provider.PlatformProvider
 import trplugins.menu.api.receptacle.vanilla.window.NMS
@@ -27,6 +29,7 @@ import trplugins.menu.module.internal.script.Bindings
 import trplugins.menu.module.internal.script.evalScript
 import trplugins.menu.module.internal.service.RegisterCommands
 import trplugins.menu.module.internal.service.Shortcuts
+import trplugins.menu.util.bukkit.Heads
 
 /**
  * @author Arasple
@@ -91,10 +94,13 @@ object TrMenu : Plugin() {
         RegisterCommands.load()
         Bindings.load()
         Tell.useComponent = SETTINGS.getBoolean("Action.Using-Component", true)
+        SetTitle.useComponent = if (MinecraftVersion.isHigherOrEqual(MinecraftVersion.V1_14)) SETTINGS.getBoolean("Action.Title-Using-Component", false) else false
         PlatformProvider.compute()
         NMS.javaStaticInventory = SETTINGS.getBoolean("Options.Static-Inventory.Java", false)
         NMS.bedrockStaticInventory = SETTINGS.getBoolean("Options.Static-Inventory.Bedrock", false)
         NMS.createIdPacketInventory = SETTINGS.getBoolean("Options.Packet-Inventory.Create-Id", false)
+        Heads.headConnectTimeout = SETTINGS.getInt("Menu.Icon.Item.Head-Connect-Timeout", 500)
+        Heads.headReadTimeout = SETTINGS.getInt("Menu.Icon.Item.Head-Read-Timeout", 2500)
     }
 
 }

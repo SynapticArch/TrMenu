@@ -37,9 +37,10 @@ object HookPlaceholderAPI : PlaceholderExpansion {
             "menus" -> Menu.menus.size
             "args" -> session.arguments[key.toIntOrNull() ?: 0]
             "meta" -> Metadata.getMeta(player)[key]
+            "dialog" -> Metadata.getMeta(player)["dialog_${value()}"]
             "data" -> Metadata.getData(player)[key]
             "globaldata" -> runCatching { Metadata.globalData[value()].toString() }.getOrElse { "null" }
-            "node" -> session.menu?.conf?.let { it[it.ignoreCase(value())].toString() }.toString()
+            "node" -> session.getNodeValue(value())?.toString() ?: "null"
             "menu" -> menu(session, params)
             "locale" -> session.locale
             "js" -> if (enabledParseJavaScript) if (params.size > 1) JavaScriptAgent.eval(session, params[1]).asString() else "" else "UNABLE_PARSE"
@@ -50,12 +51,13 @@ object HookPlaceholderAPI : PlaceholderExpansion {
     }
 
     private fun menu(session: MenuSession, params: List<String>): String {
+        val menu = session.menu
         return when (params[1]) {
             "page" -> session.page.toString()
-            "pages" -> session.menu?.layout?.layouts?.size.toString()
+            "pages" -> menu?.dialogSpec?.pageCount()?.toString() ?: menu?.layout?.layouts?.size.toString()
             "next" -> (session.page + 1).toString()
             "prev" -> (session.page - 1).toString()
-            "title" -> session.menu?.settings?.title(session)?.get(session.id).toString()
+            "title" -> menu?.settings?.title(session)?.get(session.id).toString()
             else -> ""
         }
     }

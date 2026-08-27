@@ -2,11 +2,12 @@ package trplugins.menu.module.conf
 
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.inventory.InventoryView
-import org.bukkit.inventory.ItemFlag
 import taboolib.common.platform.function.pluginId
 import taboolib.common.platform.function.warning
 import taboolib.common.util.asList
 import taboolib.library.configuration.ConfigurationSection
+import taboolib.library.reflex.Reflex.Companion.invokeConstructor
+import taboolib.library.xseries.XItemFlag
 import taboolib.module.configuration.Configuration
 import taboolib.module.configuration.Type
 import taboolib.module.lang.Language
@@ -24,11 +25,34 @@ import trplugins.menu.api.receptacle.ReceptacleClickType
 import trplugins.menu.api.suffixes
 import trplugins.menu.module.conf.prop.SerializeError
 import trplugins.menu.module.conf.prop.SerialzeResult
+import trplugins.menu.TrMenu
 import trplugins.menu.module.display.Menu
+import trplugins.menu.module.display.MenuRenderType
 import trplugins.menu.module.display.MenuSettings
+import trplugins.menu.module.display.dialog.model.DialogActionSpec
+import trplugins.menu.module.display.dialog.model.DialogBooleanSpec
+import trplugins.menu.module.display.dialog.model.DialogCompilerSpec
+import trplugins.menu.module.display.dialog.model.DialogCompilerStrategy
+import trplugins.menu.module.display.dialog.model.DialogInputSpec
+import trplugins.menu.module.display.dialog.model.DialogItemDisplaySpec
+import trplugins.menu.module.display.dialog.model.DialogItemSpec
+import trplugins.menu.module.display.dialog.model.DialogLayoutSpec
+import trplugins.menu.module.display.dialog.model.DialogMenuSpec
+import trplugins.menu.module.display.dialog.model.DialogMultiOptionSpec
+import trplugins.menu.module.display.dialog.model.DialogNumberRangeSpec
+import trplugins.menu.module.display.dialog.model.DialogOptionSpec
+import trplugins.menu.module.display.dialog.model.DialogPageSpec
+import trplugins.menu.module.display.dialog.model.DialogPlainMessageSpec
+import trplugins.menu.module.display.dialog.model.DialogScreenType
+import trplugins.menu.module.display.dialog.model.DialogSectionSpec
+import trplugins.menu.module.display.dialog.model.DialogSingleOptionSpec
+import trplugins.menu.module.display.dialog.model.DialogUnsupportedPolicy
+import trplugins.menu.module.display.dialog.model.DialogWidgetKind
+import trplugins.menu.module.display.dialog.model.DialogWidgetSpec
 import trplugins.menu.module.display.icon.Icon
 import trplugins.menu.module.display.icon.IconProperty
 import trplugins.menu.module.display.icon.Position
+import trplugins.menu.module.display.item.DisplayEnchant
 import trplugins.menu.module.display.item.Item
 import trplugins.menu.module.display.item.Lore
 import trplugins.menu.module.display.item.Meta
@@ -36,12 +60,16 @@ import trplugins.menu.module.display.layout.Layout
 import trplugins.menu.module.display.layout.MenuLayout
 import trplugins.menu.module.display.texture.Texture
 import trplugins.menu.module.internal.script.js.ScriptFunction
+import trplugins.menu.util.Regexs
 import trplugins.menu.util.bukkit.ItemMatcher
 import trplugins.menu.util.collections.CycleList
 import trplugins.menu.util.collections.IndivList
 import trplugins.menu.util.conf.Property
 import trplugins.menu.util.parseIconId
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.collections.forEach
+import kotlin.jvm.optionals.getOrNull
 import kotlin.math.max
 
 /**
@@ -81,32 +109,49 @@ object MenuSerializer : ISerializer {
             else -> emptyMap()
         }
 
+        val renderType = MenuRenderType.from(Property.RENDER_TYPE.ofString(conf, MenuRenderType.WINDOW.name))
+
         // 读取菜单设置
         val settings = serializeSetting(conf, languages)
         if (!settings.succeed()) {
-            result.errors.addAll(settings.errors).also {
+            result.submitErrors(settings).also {
                 return result
             }
         }
 
+        val dialog = if (renderType == MenuRenderType.DIALOG) {
+            serializeDialog(conf)
+        } else null
+        if (dialog != null && !dialog.succeed()) {
+            result.submitErrors(dialog).also { return result }
+        }
+
         // 读取菜单布局
-        val layout = serializeLayout(conf)
+        val layout = if (renderType == MenuRenderType.DIALOG) {
+            serializeDialogPlaceholderLayout((dialog?.result as? DialogMenuSpec)?.pageCount() ?: 1)
+        } else {
+            serializeLayout(conf)
+        }
         if (!layout.succeed()) {
-            result.errors.addAll(layout.errors).also { return result }
+            result.submitErrors(layout).also { return result }
         }
         // 读取菜单图标
-        val icons = serializeIcons(conf, languages, layout.asLayout())
+        val icons = if (renderType == MenuRenderType.DIALOG) {
+            SerialzeResult(SerialzeResult.Type.ICON).also { it.result = emptyList<Icon>() }
+        } else {
+            serializeIcons(conf, languages, layout.asLayout())
+        }
         if (!icons.succeed()) {
-            result.errors.addAll(icons.errors).also {
+            result.submitErrors(icons).also {
                 return result
             }
         }
 
         // 读取菜单语言
-        val lang: Map<String, HashMap<String, taboolib.module.lang.Type>>? = if (languages.isEmpty()) null else {
-            val map = HashMap<String, HashMap<String, taboolib.module.lang.Type>>()
+        val lang: Map<String, ConcurrentHashMap<String, taboolib.module.lang.Type>>? = if (languages.isEmpty()) null else {
+            val map = mutableMapOf<String, ConcurrentHashMap<String, taboolib.module.lang.Type>>()
             languages.forEach { entry ->
-                val nodes = serializeLocaleNodes(entry.key, entry.value, HashMap())
+                val nodes = serializeLocaleNodes(entry.key, entry.value, ConcurrentHashMap())
                 if (nodes.isNotEmpty()) {
                     map[entry.key.lowercase()] = nodes
                 }
@@ -120,6 +165,8 @@ object MenuSerializer : ISerializer {
             settings.result as MenuSettings,
             layout.result as MenuLayout,
             icons.asIcons(),
+            renderType,
+            dialog?.result as? DialogMenuSpec,
             conf,
             if (languages.isNotEmpty()) langKey else null,
             lang
@@ -165,6 +212,7 @@ object MenuSerializer : ISerializer {
         val eventOpen = Property.EVENT_OPEN.ofList(events)
         val eventClose = Property.EVENT_CLOSE.ofList(events)
         val eventClick = Property.EVENT_CLICK.ofList(events)
+        val commandFakeOp = Property.COMMAND_FAKE_OP.ofBoolean(options, true)
 
         val settings = MenuSettings(
             CycleList(title),
@@ -196,7 +244,8 @@ object MenuSerializer : ISerializer {
                     )
                 }
             },
-            funs.map { ScriptFunction(it.key, it.value.toString()) }.toSet()
+            funs.map { ScriptFunction(it.key, it.value.toString()) }.toSet(),
+            commandFakeOp
         )
 
         // i18n
@@ -208,6 +257,16 @@ object MenuSerializer : ISerializer {
         }
 
         result.result = settings
+        return result
+    }
+
+    private fun serializeDialogPlaceholderLayout(pageCount: Int): SerialzeResult {
+        val result = SerialzeResult(SerialzeResult.Type.MENU_LAYOUT)
+        val safePages = pageCount.coerceAtLeast(1)
+        val layouts = Array(safePages) {
+            Layout(1, InventoryType.CHEST, emptyList(), emptyList())
+        }
+        result.result = MenuLayout(layouts)
         return result
     }
 
@@ -338,11 +397,17 @@ object MenuSerializer : ISerializer {
 
             // Meta
             val amount = if (inherit.contains(Property.ICON_DISPLAY_AMOUNT)) def!!.display.meta.amount else Property.ICON_DISPLAY_AMOUNT.ofString(display, "1")
-            val shiny = if (inherit.contains(Property.ICON_DISPLAY_SHINY)) def!!.display.meta.shiny else Property.ICON_DISPLAY_SHINY.ofString(display, "false")
+            val shiny = if (inherit.contains(Property.ICON_DISPLAY_SHINY)) def!!.display.meta.shiny else parseDisplayShiny(display)
+            val enchants = if (inherit.contains(Property.ICON_DISPLAY_ENCHANT)) {
+                def!!.display.meta.enchants
+            } else {
+                parseDisplayEnchants(display)
+            }
             val flags = if (inherit.contains(Property.ICON_DISPLAY_FLAGS)) {
                 def!!.display.meta.flags
             } else Property.ICON_DISPLAY_FLAGS.ofStringList(display).mapNotNull { flag ->
-                ItemFlag.entries.find { it.name.equals(flag, true) }
+//                ItemFlag.entries.find { it.name.equals(flag, true) }
+                XItemFlag.of(flag).getOrNull()?.get()
             }.toTypedArray()
             val nbt = if (inherit.contains(Property.ICON_DISPLAY_NBT)) {
                 def!!.display.meta.nbt
@@ -358,6 +423,12 @@ object MenuSerializer : ISerializer {
             val hideTooltip = if (inherit.contains(Property.ICON_DISPLAY_HIDE_TOOLTIP)) {
                 def!!.display.meta.hideTooltip
             } else Property.ICON_DISPLAY_HIDE_TOOLTIP.ofString(display, "false")
+            val unbreakable = if (inherit.contains(Property.ICON_DISPLAY_UNBREAKABLE)) {
+                def!!.display.meta.unbreakable
+            } else Property.ICON_DISPLAY_UNBREAKABLE.ofString(display, "false")
+            val data = if (inherit.contains(Property.ICON_DISPLAY_DATA)) {
+                def!!.display.meta.data
+            } else Property.ICON_DISPLAY_DATA.ofString(display, "")
 
             // only for the subIcon
             val priority = Property.PRIORITY.ofInt(it, order)
@@ -394,7 +465,7 @@ object MenuSerializer : ISerializer {
                 if (def != null && inherit.contains(Property.ICON_DISPLAY_LORE) && lore.isEmpty()) def.display.lore
                 else CycleList(lore.map { Lore(line(it)) }),
                 // 图标附加属性
-                Meta(amount, shiny, flags, nbt, tooltipStyle, itemModel, hideTooltip)
+                Meta(amount, shiny, flags, enchants, nbt, tooltipStyle, itemModel, hideTooltip, unbreakable, data)
             )
 
             // i18n
@@ -418,13 +489,328 @@ object MenuSerializer : ISerializer {
             IconProperty(priority, condition, item, clickActions)
         }
 
+    private fun serializeDialog(conf: Configuration): SerialzeResult {
+        val result = SerialzeResult(SerialzeResult.Type.MENU)
+        val dialogSection = Property.DIALOG.ofSection(conf)
+        if (dialogSection == null) {
+            result.submitError(RuntimeException("Dialog section is required when Render-Type is DIALOG."))
+            result.state = SerialzeResult.State.FAILED
+            return result
+        }
+        val compilerSection = Property.DIALOG_COMPILER.ofSection(dialogSection)
+        val compiler = DialogCompilerSpec(
+            strategy = DialogCompilerStrategy.from(Property.DIALOG_COMPILER_STRATEGY.ofString(compilerSection, "AUTO")),
+            unsupportedPolicy = DialogUnsupportedPolicy.from(Property.DIALOG_COMPILER_UNSUPPORTED_POLICY.ofString(compilerSection, "FALLBACK_MENU")),
+            gridColumns = Property.DIALOG_COMPILER_GRID_COLUMNS.ofInt(compilerSection, 12),
+            contentMaxWidth = Property.DIALOG_COMPILER_CONTENT_MAX_WIDTH.ofInt(compilerSection, 360),
+            mixinAssist = Property.DIALOG_COMPILER_MIXIN_ASSIST.ofBoolean(compilerSection, false)
+        )
+        val pages = dialogSection.getMapList(Property.DIALOG_PAGES.default).mapIndexed { index, pageMap ->
+            serializeDialogPage(index, Property.asSection(pageMap) ?: Configuration.empty())
+        }
+        if (pages.isEmpty()) {
+            result.submitError(RuntimeException("Dialog pages are required when Render-Type is DIALOG."))
+            result.state = SerialzeResult.State.FAILED
+            return result
+        }
+        result.result = DialogMenuSpec(
+            minVersion = parseDialogVersion(Property.DIALOG_MIN_VERSION.ofString(dialogSection, "1.21.6")),
+            fallbackMenu = Property.DIALOG_FALLBACK_MENU.ofString(dialogSection),
+            allowEscClose = Property.DIALOG_ALLOW_ESC_CLOSE.ofBoolean(dialogSection, true),
+            externalTitle = Property.DIALOG_EXTERNAL_TITLE.ofString(dialogSection),
+            compiler = compiler,
+            pages = pages
+        )
+        return result
+    }
+
+    private fun serializeDialogPage(index: Int, section: Configuration): DialogPageSpec {
+        val layout = serializeDialogLayout(section)
+        val pageActions = if (layout != null) emptyList() else section.getMapList(Property.DIALOG_PAGE_ACTIONS.default).mapIndexed { actionIndex, actionMap ->
+            serializeDialogAction(actionIndex, Property.asSection(actionMap) ?: Configuration.empty())
+        }
+        val explicitExitAction = section["Exit-Action"]?.let {
+            serializeDialogAction(-1, Property.asSection(it) ?: Configuration.empty()).copy(exitAction = true)
+        }
+        val (exitAction, actions) = if (explicitExitAction != null) {
+            explicitExitAction to pageActions.filterNot { it.exitAction }
+        } else {
+            val marked = pageActions.firstOrNull { it.exitAction }
+            marked to pageActions.filterNot { it.exitAction }
+        }
+        val body = if (layout != null) emptyList() else section.getMapList(Property.DIALOG_PAGE_BODY.default).mapIndexedNotNull { bodyIndex, bodyMap ->
+            serializeDialogBody(bodyIndex, Property.asSection(bodyMap) ?: Configuration.empty())
+        }
+        return DialogPageSpec(
+            id = Property.DIALOG_PAGE_ID.ofString(section, "page_$index"),
+            type = DialogScreenType.from(Property.DIALOG_PAGE_TYPE.ofString(section, "NOTICE")),
+            title = Property.DIALOG_PAGE_TITLE.ofString(section),
+            body = body,
+            actions = actions,
+            exitAction = exitAction,
+            layoutSpec = layout,
+            onClose = Reactions.ofReaction(TrMenu.actionHandle, section["On-Close"])
+        )
+    }
+
+    private fun serializeDialogBody(index: Int, section: Configuration): trplugins.menu.module.display.dialog.model.DialogBodySpec? {
+        val renderer = section.getString("Renderer")?.lowercase() ?: section.getString("Type")?.lowercase() ?: return null
+        val id = section.getString("Id") ?: "body_$index"
+        val width = section.getInt("Width").takeIf { it > 0 }
+        return when (renderer) {
+            "plain_message", "text", "message" -> DialogPlainMessageSpec(id, section.getStringList("Text"), width)
+            "item" -> DialogItemSpec(id, serializeDialogItemDisplay(Property.asSection(section["Display"]) ?: Configuration.empty()), width)
+            "input" -> DialogInputSpec(
+                id = id,
+                label = section.getString("Label") ?: id,
+                placeholder = section.getString("Placeholder"),
+                defaultValue = section.getString("Default-Value"),
+                maxLength = section.getInt("Max-Length").takeIf { it > 0 },
+                width = width
+            )
+            "boolean", "toggle" -> DialogBooleanSpec(
+                id = id,
+                label = section.getString("Label") ?: id,
+                initial = section.getBoolean("Initial", false),
+                width = width
+            )
+            "single_option", "single-option", "select" -> DialogSingleOptionSpec(
+                id = id,
+                label = section.getString("Label") ?: id,
+                options = serializeDialogOptions(section),
+                defaultValue = section.getString("Default-Value"),
+                width = width
+            )
+            "multi_option", "multi-option" -> DialogMultiOptionSpec(
+                id = id,
+                label = section.getString("Label") ?: id,
+                options = serializeDialogOptions(section),
+                defaultValue = section.getStringList("Default-Value"),
+                width = width
+            )
+            "number_range", "number-range", "range" -> DialogNumberRangeSpec(
+                id = id,
+                label = section.getString("Label") ?: id,
+                min = section.getDouble("Min"),
+                max = section.getDouble("Max"),
+                step = section.getDouble("Step").takeIf { it > 0 } ?: 1.0,
+                defaultValue = section.getString("Default-Value")?.toDoubleOrNull(),
+                width = width
+            )
+            else -> null
+        }
+    }
+
+    private fun serializeDialogAction(index: Int, section: Configuration): DialogActionSpec {
+        return DialogActionSpec(
+            id = section.getString("Id") ?: "action_$index",
+            label = section.getString("Label") ?: "Action-$index",
+            width = section.getInt("Width").takeIf { it > 0 },
+            nextPage = section.getString("Next-Page")?.toIntOrNull() ?: section.getInt("Next-Page").takeIf { section.contains("Next-Page") },
+            exitAction = section.getBoolean("Exit", false),
+            actions = Reactions.ofReaction(TrMenu.actionHandle, section["Execute"] ?: section["Actions"]),
+            denyActions = section["Deny"]?.let { Reactions.ofReaction(TrMenu.actionHandle, it) }
+        )
+    }
+
+    private fun serializeDialogLayout(section: Configuration): DialogLayoutSpec? {
+        val widgetsSection = Property.DIALOG_WIDGETS.ofSection(section) ?: return null
+        val layoutSection = Property.DIALOG_LAYOUT.ofSection(section)
+        val sectionsSection = Property.DIALOG_LAYOUT_SECTIONS.ofSection(layoutSection)
+        val sections = sectionsSection
+            ?.getKeys(false)
+            ?.associateWith { key ->
+                val sub = sectionsSection.getConfigurationSection(key)
+                DialogSectionSpec(key, sub?.getInt("row", 0) ?: 0)
+            }
+            ?: emptyMap()
+        val widgets = widgetsSection.getKeys(false).map { key ->
+            val widget = widgetsSection.getConfigurationSection(key) ?: Configuration.empty()
+            DialogWidgetSpec(
+                id = key,
+                kind = DialogWidgetKind.from(Property.DIALOG_WIDGET_KIND.ofString(widget, "TEXT")),
+                anchor = Property.DIALOG_WIDGET_ANCHOR.ofString(widget, "content"),
+                row = Property.DIALOG_WIDGET_ROW.ofInt(widget, 1),
+                colStart = Property.DIALOG_WIDGET_COL_START.ofInt(widget, 1),
+                colSpan = Property.DIALOG_WIDGET_COL_SPAN.ofInt(widget, 12),
+                order = Property.DIALOG_WIDGET_ORDER.ofInt(widget, 0),
+                width = widget.getInt("width").takeIf { it > 0 },
+                text = widget.getStringList("text"),
+                label = widget.getString("label"),
+                placeholder = widget.getString("placeholder"),
+                display = widget["display"]?.let { serializeDialogItemDisplay(Property.asSection(it) ?: Configuration.empty()) },
+                options = serializeDialogOptions(widget),
+                initialBoolean = widget.getBoolean("initial", false),
+                defaultValue = widget.getString("default-value"),
+                defaultValues = widget.getStringList("default-values").ifEmpty { widget.getStringList("default-value") },
+                min = widget.getString("min")?.toDoubleOrNull(),
+                max = widget.getString("max")?.toDoubleOrNull(),
+                step = widget.getString("step")?.toDoubleOrNull() ?: 1.0,
+                maxLength = widget.getInt("max-length").takeIf { it > 0 },
+                nextPage = widget.getString("next-page")?.toIntOrNull(),
+                exitAction = widget.getBoolean("exit", false) || widget.getBoolean("exit-action", false),
+                actions = Property.asList(widget["execute"] ?: widget["actions"]),
+                condition = widget.getString("condition") ?: ""
+            )
+        }
+        return DialogLayoutSpec(
+            rowGap = Property.DIALOG_LAYOUT_ROW_GAP.ofInt(layoutSection, 1),
+            sections = sections,
+            widgets = widgets
+        )
+    }
+
+    private fun serializeDialogOptions(section: ConfigurationSection): List<DialogOptionSpec> {
+        val optionMaps = section.getMapList("Options").ifEmpty { section.getMapList("options") }
+        return optionMaps.mapIndexed { index, optionMap ->
+            val option = Property.asSection(optionMap) ?: Configuration.empty()
+            DialogOptionSpec(
+                id = option.getString("id") ?: option.getString("Id") ?: "option_$index",
+                title = option.getString("title") ?: option.getString("Title") ?: option.getString("name") ?: option.getString("Name") ?: "Option-$index",
+                description = option.getString("description") ?: option.getString("Description")
+            )
+        }
+    }
+
+    private fun serializeDialogItemDisplay(section: Configuration): DialogItemDisplaySpec {
+        return DialogItemDisplaySpec(
+            material = section.getString("material") ?: section.getString("Material") ?: "STONE",
+            name = section.getString("name") ?: section.getString("Name"),
+            lore = section.getStringList("lore").ifEmpty { section.getStringList("Lore") },
+            amount = (section.getString("amount") ?: section.getString("Amount"))?.toIntOrNull() ?: 1
+        )
+    }
+
+    private fun parseDialogVersion(version: String?): Int {
+        val value = version?.trim().orEmpty()
+        if (value.matches(Regex("\\d+"))) {
+            return value.toInt()
+        }
+        val split = value.split('.')
+        val major = split.getOrNull(0)?.toIntOrNull() ?: 1
+        val minor = split.getOrNull(1)?.toIntOrNull() ?: 0
+        val patch = split.getOrNull(2)?.toIntOrNull() ?: 0
+        return major * 10000 + minor * 100 + patch
+    }
+
+    private fun parseDisplayShiny(display: Configuration?): String {
+        if (display == null) {
+            return "false"
+        }
+        display.getKeys(false).firstOrNull { it.equals("shiny", true) || it.equals("glow", true) }?.let { key ->
+            return display[key].toString()
+        }
+        display.getKeys(false).firstOrNull { it.matches(Property.ICON_DISPLAY_ENCHANT.regex) }?.let { key ->
+            val value = display[key]
+            if (value is Boolean) {
+                return value.toString()
+            }
+            val content = value?.toString()?.trim().orEmpty()
+            if (content.matches(Regexs.BOOLEAN)) {
+                return content
+            }
+        }
+        return "false"
+    }
+
+    private fun parseDisplayEnchants(display: Configuration?): List<DisplayEnchant> {
+        if (display == null) {
+            return emptyList()
+        }
+        val key = display.getKeys(false).firstOrNull { it.matches(Property.ICON_DISPLAY_ENCHANT.regex) } ?: return emptyList()
+        return parseDisplayEnchantValue(display[key])
+    }
+
+    private fun parseDisplayEnchantValue(raw: Any?): List<DisplayEnchant> {
+        return when (raw) {
+            null -> emptyList()
+            is List<*> -> raw.flatMap { parseDisplayEnchantElement(it) }
+            is ConfigurationSection -> parseDisplayEnchantMap(raw.getValues(false))
+            is Map<*, *> -> parseDisplayEnchantMap(raw)
+            else -> listOfNotNull(parseDisplayEnchantString(raw.toString()))
+        }
+    }
+
+    private fun parseDisplayEnchantElement(raw: Any?): List<DisplayEnchant> {
+        return when (raw) {
+            null -> emptyList()
+            is List<*> -> raw.flatMap { parseDisplayEnchantElement(it) }
+            is ConfigurationSection -> parseDisplayEnchantMap(raw.getValues(false))
+            is Map<*, *> -> parseDisplayEnchantMap(raw)
+            else -> listOfNotNull(parseDisplayEnchantString(raw.toString()))
+        }
+    }
+
+    private fun parseDisplayEnchantMap(raw: Map<*, *>): List<DisplayEnchant> {
+        if (raw.isEmpty()) {
+            return emptyList()
+        }
+        if (isDisplayEnchantDescriptor(raw)) {
+            return listOfNotNull(parseDisplayEnchantDescriptor(raw))
+        }
+        return raw.entries.mapNotNull { (key, value) ->
+            val enchantKey = key?.toString()?.trim().orEmpty()
+            val enchantLevel = value?.toString()?.trim().orEmpty()
+            if (enchantKey.isEmpty() || enchantLevel.isEmpty()) {
+                null
+            } else {
+                DisplayEnchant(enchantKey, enchantLevel)
+            }
+        }
+    }
+
+    private fun isDisplayEnchantDescriptor(raw: Map<*, *>): Boolean {
+        return raw.keys.any { key ->
+            val content = key?.toString().orEmpty()
+            content.equals("id", true) ||
+                content.equals("key", true) ||
+                content.equals("type", true) ||
+                content.equals("enchant", true) ||
+                content.equals("enchantment", true)
+        }
+    }
+
+    private fun parseDisplayEnchantDescriptor(raw: Map<*, *>): DisplayEnchant? {
+        val enchantKey = readDisplayEnchantField(raw, "id", "key", "type", "enchant", "enchantment") ?: return null
+        val enchantLevel = readDisplayEnchantField(raw, "level", "lvl", "value", "amount") ?: "1"
+        return DisplayEnchant(enchantKey, enchantLevel)
+    }
+
+    private fun readDisplayEnchantField(raw: Map<*, *>, vararg names: String): String? {
+        return raw.entries.firstOrNull { entry -> names.any { entry.key?.toString().equals(it, true) } }
+            ?.value
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun parseDisplayEnchantString(raw: String): DisplayEnchant? {
+        val content = raw.trim()
+        if (content.isEmpty()) {
+            return null
+        }
+        val split = content.split(Regex("[,\\s]+"), limit = 2).map { it.trim() }.filter { it.isNotEmpty() }
+        if (split.size == 2) {
+            return DisplayEnchant(split[0], split[1])
+        }
+        val lastColon = content.lastIndexOf(':')
+        if (lastColon in 1 until content.lastIndex) {
+            val enchantKey = content.substring(0, lastColon).trim()
+            val enchantLevel = content.substring(lastColon + 1).trim()
+            if (enchantKey.isNotEmpty() && enchantLevel.toIntOrNull() != null) {
+                return DisplayEnchant(enchantKey, enchantLevel)
+            }
+        }
+        return DisplayEnchant(content, "1")
+    }
+
     val line: (List<String>) -> List<String> =
         { origin -> mutableListOf<String>().also { list -> origin.forEach { list.addAll(it.split("\n")) } } }
 
     // Method body taken from Taboolib, licensed under the MIT License
     //
     // Copyright (c) 2018 Bkm016
-    private fun serializeLocaleNodes(code: String, file: ConfigurationSection, nodes: HashMap<String, taboolib.module.lang.Type>, root: String = ""): HashMap<String, taboolib.module.lang.Type> {
+    private fun serializeLocaleNodes(code: String, file: ConfigurationSection, nodes: ConcurrentHashMap<String, taboolib.module.lang.Type>, root: String = ""): ConcurrentHashMap<String, taboolib.module.lang.Type> {
         file.getKeys(false).forEach { node ->
             val key = "$root$node"
             when (val obj = file[node]) {
@@ -474,7 +860,8 @@ object MenuSerializer : ISerializer {
     private fun serializeLocaleNode(code: String, map: Map<String, Any>, node: String?): taboolib.module.lang.Type? {
         return if (map.containsKey("type") || map.containsKey("==")) {
             val type = (map["type"] ?: map["=="]).toString().lowercase()
-            val typeInstance = Language.languageType[type]?.getDeclaredConstructor()?.newInstance()
+            @Suppress("UNCHECKED_CAST")
+            val typeInstance = (Language.languageType[type] as? Class<taboolib.module.lang.Type>)?.invokeConstructor()
             if (typeInstance != null) {
                 typeInstance.init(map)
             } else {

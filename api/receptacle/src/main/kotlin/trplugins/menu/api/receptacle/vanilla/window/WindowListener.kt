@@ -17,6 +17,7 @@ import trplugins.menu.api.receptacle.ReceptacleCloseEvent
 import trplugins.menu.api.receptacle.ReceptacleInteractEvent
 import trplugins.menu.api.receptacle.getViewingReceptacle
 import trplugins.menu.api.receptacle.vanilla.window.NMS.Companion.useStaticInventory
+import trplugins.menu.api.receptacle.vanilla.window.StaticInventory.staticInventory
 
 @PlatformSide(Platform.BUKKIT)
 object WindowListener {
@@ -39,7 +40,8 @@ object WindowListener {
                 if (MinecraftVersion.isUniversal) {
                     slot = e.packet.read<Int>("slotNum")!!
                     button = e.packet.read<Int>("buttonNum")!!
-                    clickType = ReceptacleClickType.from(e.packet.read<Any>("clickType").toString(), button, slot) ?: return
+                    val clickTypeField = if (MinecraftVersion.isUnobfuscated) "containerInput" else "clickType"
+                    clickType = ReceptacleClickType.from(e.packet.read<Any>(clickTypeField).toString(), button, slot) ?: return
                 } else if (MinecraftVersion.majorLegacy >= 10900) {
                     slot = e.packet.read<Int>("slot")!!
                     button = e.packet.read<Int>("button")!!
@@ -67,6 +69,7 @@ object WindowListener {
 
     @SubscribeEvent
     fun onClick(e: InventoryClickEvent) {
+        (e.whoClicked as? Player)?.staticInventory ?: return
         if (e.inventory.holder is StaticInventory.Holder) {
             e.isCancelled = true
 
@@ -81,6 +84,7 @@ object WindowListener {
 
     @SubscribeEvent
     fun onClose(e: InventoryCloseEvent) {
+        (e.player as? Player)?.staticInventory ?: return
         if (e.inventory.holder is StaticInventory.Holder) {
             val player = e.player as? Player ?: return
             val receptacle = player.getViewingReceptacle() as? WindowReceptacle ?: return
@@ -91,6 +95,7 @@ object WindowListener {
 
     @SubscribeEvent
     fun onDrag(e: InventoryDragEvent) {
+        (e.whoClicked as? Player)?.staticInventory ?: return
         if (e.inventory.holder is StaticInventory.Holder) {
             e.isCancelled = true
         }
@@ -102,7 +107,11 @@ object WindowListener {
         receptacle.callEventClick(evt)
         if (evt.isCancelled) {
             if (clickType == ReceptacleClickType.OFFHAND) {
-                nmsProxy<NMS>().sendWindowsSetSlot(player, windowId = 0, slot = 45)
+                if (MinecraftVersion.majorLegacy < 12111) {
+                    nmsProxy<NMS>().sendWindowsSetSlot(player, windowId = 0, slot = 45)
+                } else {
+                    nmsProxy<NMS>().sendWindowsSetSlot(player, slot = -1, windowId = -1)
+                }
             } else {
                 nmsProxy<NMS>().sendWindowsSetSlot(player, slot = -1, windowId = -1)
             }

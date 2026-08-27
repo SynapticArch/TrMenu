@@ -1,0 +1,129 @@
+Title: '&0MULTI_ACTION 示例 - 服务器分区'
+Render-Type: DIALOG
+
+Dialog:
+  Min-Version: '1.21.6'
+  Fallback-Menu: 'Example'
+  Allow-Esc-Close: true
+  External-Title: '&8Dialogs / MultiAction'
+  Compiler:
+    Strategy: AUTO
+    Unsupported-Policy: FALLBACK_MENU
+    Grid-Columns: 12
+    Content-Max-Width: 360
+    Mixin-Assist: false
+  Pages:
+    - Id: 'server_select'
+      Type: 'multi_action'
+      Title: '&0MULTI_ACTION 示例 - 服务器分区'
+      Exit-Action:
+        Id: 'exit_dialog'
+        Label: '&c关闭面板'
+        Width: 120
+        Execute:
+          - 'tell: &7你已关闭 MULTI_ACTION 示例面板'
+          - 'close'
+      Layout:
+        Row-Gap: 1
+        Sections:
+          header:
+            row: 1
+          content:
+            row: 2
+          footer:
+            row: 6
+      Widgets:
+        logo:
+          kind: item
+          anchor: header
+          row: 1
+          col-start: 1
+          col-span: 3
+          display:
+            material: NETHER_STAR
+            name: '&e服务器入口'
+            lore:
+              - '&7欢迎使用 Dialog UI'
+        intro:
+          kind: text
+          anchor: header
+          row: 1
+          col-start: 4
+          col-span: 9
+          text:
+            - '&7这是一个 &bMULTI_ACTION&7 类型示例。'
+            - '&7它演示了布局、Exit-Action 与 multi_option。'
+        target:
+          kind: single_option
+          anchor: content
+          row: 1
+          col-start: 1
+          col-span: 12
+          label: '&7目标分区'
+          options:
+            - id: survival
+              title: '&a生存服'
+              description: '&7主线生存玩法'
+            - id: skyblock
+              title: '&b空岛服'
+              description: '&7独立空岛发展'
+            - id: pvp
+              title: '&c竞技服'
+              description: '&7即时战斗玩法'
+        server_modes:
+          kind: multi_option
+          anchor: content
+          row: 2
+          col-start: 1
+          col-span: 12
+          label: '&7附加模式'
+          default-values:
+            - cross_server
+          options:
+            - id: cross_server
+              title: '&e跨服匹配'
+              description: '&7允许跨服自动匹配队列'
+            - id: double_rewards
+              title: '&6双倍奖励'
+              description: '&7优先进入奖励线路'
+            - id: observer
+              title: '&7观察者'
+              description: '&7以旁观模式进入'
+        note:
+          kind: input
+          anchor: content
+          row: 3
+          col-start: 1
+          col-span: 12
+          label: '&7备注'
+          placeholder: '&8输入你本次进入的目的'
+          max-length: 24
+        agree:
+          kind: boolean
+          anchor: content
+          row: 4
+          col-start: 1
+          col-span: 12
+          label: '&7我已阅读传送说明'
+          initial: false
+        connect:
+          kind: action
+          anchor: footer
+          row: 1
+          col-start: 1
+          col-span: 6
+          label: '&a立即前往'
+          execute:
+            - 'tell: &a正在连接 %trmenu_dialog_option_target%'
+            - 'tell: &7附加模式: %trmenu_dialog_option_server_modes%'
+            - 'close'
+        queue:
+          kind: action
+          anchor: footer
+          row: 1
+          col-start: 7
+          col-span: 6
+          label: '&e加入队列'
+          execute:
+            - 'tell: &e已加入 %trmenu_dialog_option_target% 队列'
+            - 'tell: &7附加模式: %trmenu_dialog_option_server_modes%'

@@ -11,6 +11,14 @@ Options:
     Bedrock: false
   Packet-Inventory:
     Create-Id: false
+  Dialogs:
+    Enable: true
+    Min-Version: '1.21.6'
+    Debug: false
+    Fallback-On-Error: true
+  # 代理类型: BUNGEE / VELOCITY / AUTO
+  # AUTO 模式下同时注册 BungeeCord 和 bungeecord:main 两个 channel
+  Proxy: AUTO
   Bedrock-Open-Delay: 20
 
   Placeholders:
@@ -80,9 +88,12 @@ Menu:
       Default-Name-Color: "&7"
       Default-Lore-Color: "&7"
       Pre-Color: false
+      Head-Connect-Timeout: 500
+      Head-Read-Timeout: 2500
 
 Action:
   Using-Component: true
+  Title-Using-Component: true
   Inputer:
     Cancel-Words:
       - 'cancel|quit|end'

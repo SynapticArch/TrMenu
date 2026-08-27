@@ -1,15 +1,20 @@
 package trplugins.menu.module.internal.data
 
 import org.bukkit.Bukkit
+import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.metadata.FixedMetadataValue
 import taboolib.common.LifeCycle
+import taboolib.common.env.RuntimeDependency
 import taboolib.common.platform.Awake
 import taboolib.common.platform.ProxyPlayer
 import taboolib.common.platform.Schedule
 import taboolib.common.platform.function.submitAsync
+import taboolib.common5.cdouble
+import taboolib.common5.cint
 import taboolib.module.configuration.Config
 import taboolib.module.configuration.Configuration
+import taboolib.platform.util.sendLang
 import trplugins.menu.TrMenu
 import trplugins.menu.TrMenu.SETTINGS
 import trplugins.menu.api.event.CustomDatabaseEvent
@@ -30,6 +35,12 @@ import java.util.concurrent.ConcurrentHashMap
  * <meta> -> only lost when the server is shut down
  * <data> -> storable, (support MongoDB)
  */
+@RuntimeDependency(
+    value = "!org.slf4j:slf4j-jdk14:2.0.8",
+    test = "!org.slf4j_2_0_8.jul.JULServiceProvider",
+    relocate = ["!org.slf4j", "!org.slf4j_2_0_8"],
+    transitive = false
+)
 object Metadata {
 
     internal val meta = mutableMapOf<String, DataMap>()
@@ -45,6 +56,7 @@ object Metadata {
 
     // Copy in the Adyeshach
     val database by lazy {
+        if (!isUseLegacy) return@lazy null
         when (val db = SETTINGS.getString("Database.Method")?.uppercase()) {
             "LOCAL", "SQLITE", null -> DatabaseSQLite()
             "SQL" -> DatabaseSQL()
@@ -86,7 +98,7 @@ object Metadata {
 
     fun pushData(player: Player, dataMap: DataMap = getData(player)) {
         if (isUseLegacy) {
-            getLocalePlayer(player).let {
+            getLocalePlayer(player)?.let {
                 it.getConfigurationSection("TrMenu.Data")?.getKeys(true)?.forEach { key ->
                     if (!dataMap.data.containsKey(key)) {
                         it["TrMenu.Data.$key"] = null
@@ -94,7 +106,7 @@ object Metadata {
                 }
                 dataMap.data.forEach { (key, value) -> it["TrMenu.Data.$key"] = value }
             }
-            database.push(player)
+            database?.push(player)
         } else {
             dataMap.data.forEach { (key, value) ->
                 MetaDataDao.door.update(DataEntity.constructor(player, key, value?.toString() ?: ""))
@@ -102,15 +114,15 @@ object Metadata {
         }
     }
 
-    private fun getLocalePlayer(player: Player): Configuration {
-        return database.pull(player)
+    private fun getLocalePlayer(player: Player): Configuration? {
+        return database?.pull(player)
     }
 
     fun loadData(player: Player) {
         val map: MutableMap<String, Any?> = mutableMapOf()
 
         if (isUseLegacy) {
-            getLocalePlayer(player).getConfigurationSection("TrMenu.Data")?.let { section ->
+            getLocalePlayer(player)?.getConfigurationSection("TrMenu.Data")?.let { section ->
                 section.getKeys(true).forEach { key -> map[key] = section[key] }
             }
         } else {
@@ -175,6 +187,83 @@ object Metadata {
             is MenuSession -> target.placeholderPlayer.name
             else -> throw Exception("Unknown target type.")
         }
+    }
+
+
+    fun modifyData(
+        player: Player,
+        modifyType: ModifyType,
+        dataType: DataType,
+        dataName: String,
+        value: String,
+        sender: CommandSender
+    ) {
+        val data = getData(player, dataType, dataName)
+        when (modifyType) {
+            ModifyType.ADD -> {
+                setData(player, dataType, dataName, calculate(data, value))
+            }
+
+            ModifyType.REMOVE -> {
+                setData(player, dataType, dataName, null)
+            }
+
+            ModifyType.SET -> {
+                setData(player, dataType, dataName, value)
+            }
+
+            ModifyType.GET -> {
+                sender.sendLang(
+                    "Command-Data-Get",
+                    player.name,
+                    dataType,
+                    dataName,
+                    data.toString()
+                )
+            }
+        }
+    }
+
+    fun setData(player: Player, dataType: DataType, dataName: String, value: Any?) {
+        when (dataType) {
+            DataType.DATA -> {
+                getData(player)[dataName] = value
+                if (!isUseLegacy) {
+                    saveData(player, dataName)
+                }
+            }
+
+            DataType.META -> {
+                getMeta(player)[dataName] = value
+            }
+
+            DataType.GLOBAL -> setGlobalData(dataName, value)
+        }
+    }
+
+    fun getData(player: Player, dataType: DataType, dataName: String): Any? {
+        return when (dataType) {
+            DataType.DATA -> getData(player)[dataName]
+            DataType.META -> getMeta(player)[dataName]
+            DataType.GLOBAL -> getGlobalData(dataName)
+        }
+    }
+
+    fun calculate(preValue: Any?, value: String): Any {
+        val valueIsInt = value.toIntOrNull() != null
+        return if ((preValue?.toString()?.toIntOrNull() != null || preValue == null) && valueIsInt) {
+            preValue.cint + value.cint
+        } else {
+            preValue.cdouble + value.cdouble
+        }
+    }
+
+    enum class DataType {
+        DATA, META, GLOBAL
+    }
+
+    enum class ModifyType {
+        ADD, REMOVE, SET, GET
     }
 
 }

@@ -3,6 +3,7 @@ package trplugins.menu.util.bukkit
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.mojang.authlib.GameProfile
+import com.mojang.authlib.properties.PropertyMap
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.OfflinePlayer
@@ -14,11 +15,14 @@ import taboolib.library.reflex.Reflex.Companion.invokeMethod
 import taboolib.library.xseries.XMaterial
 import taboolib.module.nms.MinecraftVersion
 import taboolib.platform.util.BukkitSkull
+import taboolib.common.platform.function.submit
 import trplugins.menu.module.internal.hook.HookPlugin
+import trplugins.menu.util.ReflexHelper
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.URL
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * @author Arasple
@@ -29,6 +33,9 @@ object Heads {
     private const val USER_API = "https://api.mojang.com/users/profiles/minecraft/"
     private const val SESSION_API = "https://sessionserver.mojang.com/session/minecraft/profile/"
 
+    var headConnectTimeout: Int = 500
+    var headReadTimeout: Int = 2500
+
     private val JSON_PARSER = JsonParser()
     private val DEFAULT_HEAD = XMaterial.PLAYER_HEAD.parseItem()!!.apply {
         if (runCatching { Material.PLAYER_HEAD }.isFailure) {
@@ -38,7 +45,17 @@ object Heads {
     private val CACHED_SKULLS = mutableMapOf<String, ItemStack>()
     private val VALUE = if (MinecraftVersion.major >= 1.20) "value" else "getValue"
     private val NAME = if (MinecraftVersion.major >= 1.20) "name" else "getName"
-    private val USE_PROFILE = runCatching { OfflinePlayer::class.java.getDeclaredMethod("getPlayerProfile") }.isSuccess
+    private val USE_PROFILE = ReflexHelper.hasMethod(OfflinePlayer::class.java, listOf("getPlayerProfile"))
+
+    // 异步材质缓存: 玩家名 -> 材质URL
+    private val textureCache = ConcurrentHashMap<String, String>()
+    // 正在异步加载中的玩家名集合，防止重复请求
+    private val loading = ConcurrentHashMap.newKeySet<String>()
+    // 获取失败计数: 玩家名 -> 失败次数
+    private val failedCount = ConcurrentHashMap<String, Int>()
+    // 失败超过3次后加入黑名单，不再请求
+    private val blacklisted = ConcurrentHashMap.newKeySet<String>()
+    private const val MAX_RETRIES = 3
 
     fun cacheSize(): Int {
         return CACHED_SKULLS.size
@@ -84,7 +101,7 @@ object Heads {
         if (player != null) {
             return getPlayerHead(player)
         }
-        val texture = seekTexture(name)
+        val texture = seekTextureAsync(name)
         return if (texture == null) DEFAULT_HEAD else getCustomHead(texture)
     }
 
@@ -98,7 +115,7 @@ object Heads {
                     return getCustomHead(texture.getProperty<String>(VALUE)!!)
                 }
             }
-            val texture = seekTexture(player.name)
+            val texture = seekTextureAsync(player.name)
             return if (texture == null) DEFAULT_HEAD else getCustomHead(texture)
         }
     }
@@ -110,13 +127,71 @@ object Heads {
             meta.owningPlayer?.name?.let { return it }
         }
 
-        meta.getProperty<GameProfile>("profile")?.properties?.values()?.forEach {
+        val profileValue = meta.getProperty<Any>("profile") ?: return null
+
+        val gameProfile: GameProfile? = profileValue as? GameProfile
+                // Minecraft 1.21+ 将 profile 字段改为 ResolvableProfile
+            ?: (profileValue.getProperty<GameProfile>("partialProfile"))
+
+        // Minecraft 1.21.9+ Mojang 修改了 authLib 中的 GameProfile 类为 record 记录类
+        // 如果使用 getProperties() 会出错
+        if (MinecraftVersion.versionId >= 12109){
+            val propertyMap = gameProfile?.getProperty<PropertyMap>("properties")
+            propertyMap?.values()?.forEach {
+                if (it.getProperty<String>(NAME) == "textures") return it.getProperty<String>(VALUE)
+            }
+        }
+
+        gameProfile?.properties?.values()?.forEach {
             if (it.getProperty<String>(NAME) == "textures") return it.getProperty<String>(VALUE)
         }
         return null
     }
 
-    fun seekTexture(name: String): String? {
+    /**
+     * 非阻塞获取材质：返回缓存值或 null，并在后台异步请求 Mojang API
+     * 首次调用返回 null（显示默认头颅），下次菜单刷新时从缓存获取
+     * 失败超过 3 次后将该名称加入黑名单，不再请求
+     */
+    private fun seekTextureAsync(name: String): String? {
+        val key = name.lowercase()
+        // 已缓存直接返回
+        textureCache[key]?.let { return it }
+        // 已被黑名单标记，不再请求
+        if (key in blacklisted) return null
+        // 未在加载中则发起异步请求
+        if (loading.add(key)) {
+            submit(async = true) {
+                try {
+                    val texture = fetchTexture(name)
+                    if (texture != null) {
+                        textureCache[key] = texture
+                        failedCount.remove(key)
+                    } else {
+                        recordFailure(key)
+                    }
+                } catch (_: Exception) {
+                    recordFailure(key)
+                } finally {
+                    loading.remove(key)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun recordFailure(key: String) {
+        val count = failedCount.merge(key, 1) { old, inc -> old + inc } ?: 1
+        if (count >= MAX_RETRIES) {
+            blacklisted.add(key)
+            failedCount.remove(key)
+        }
+    }
+
+    /**
+     * 实际执行 HTTP 请求获取材质（仅在异步线程调用）
+     */
+    private fun fetchTexture(name: String): String? {
         val user = urlJson(USER_API + name)
         if (user != null && user.has("id")) {
             val uuid = user["id"].asString
@@ -137,6 +212,10 @@ object Heads {
         return null
     }
 
+    fun seekTexture(name: String): String? {
+        return textureCache[name.lowercase()]
+    }
+
     private fun urlJson(url: String): JsonObject? {
         val text = urlText(url)
         return if (text.trim { it <= ' ' }.isEmpty()) {
@@ -150,6 +229,8 @@ object Heads {
         try {
             val con = URL(url).openConnection()
             // Java 8 require user agent
+            con.connectTimeout = headConnectTimeout
+            con.readTimeout = headReadTimeout
             con.addRequestProperty("User-Agent", "Mozilla/5.0")
             con.getInputStream().use { `in` ->
                 BufferedReader(InputStreamReader(`in`)).use { reader ->
